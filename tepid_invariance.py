@@ -2,6 +2,8 @@ from lie_conv.lieGroups import SE3
 
 from lie_transformer.lie_transformer import LieTepid
 from parse_args import parse_args
+import torch
+import numpy as np
 
 if __name__ == '__main__':
     args = parse_args()
@@ -33,3 +35,8 @@ if __name__ == '__main__':
 
     model = LieTepid(args.save_path, args.learning_rate, args.weight_decay,
                      args.wandb_project, args.wandb_run, **model_kwargs)
+    coords = torch.randn(32, 20, 3).cuda()
+    feats = torch.randn(32, 20, 12).cuda()
+    mask = torch.ones(32, 20).byte().cuda()
+    print(model((coords, feats, mask)))
+    import pypdb

@@ -68,7 +68,7 @@ def parse_args():
     parser.add_argument('--radius', type=int, default=6,
                         help='Maximum distance from a ligand atom for a '
                              'receptor atom to be included in input')
-    parser.add_argument('--nbhd', type=int, default=np.inf,
+    parser.add_argument('--nbhd', type=int, default=32,
                         help='Number of monte carlo samples for integral')
     parser.add_argument('--load_args', type=PosixPath,
                         help='Load yaml file with command line args. Any args '

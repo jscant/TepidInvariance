@@ -344,34 +344,13 @@ class LieTepid(PointNeuralNetwork):
             attention_fn=attention_fn, feature_embed_dim=feature_embed_dim,
         )
 
-        activation_fn = {
-            "swish": Swish,
-            "relu": nn.ReLU,
-            "softplus": nn.Softplus,
-        }
-
-        if output_norm == "batch":
-            norm1 = nn.BatchNorm1d(dim_hidden[-1])
-            norm2 = nn.BatchNorm1d(dim_hidden[-1])
-            norm3 = nn.BatchNorm1d(dim_hidden[-1])
-        elif output_norm == "layer":
-            norm1 = nn.LayerNorm(dim_hidden[-1])
-            norm2 = nn.LayerNorm(dim_hidden[-1])
-            norm3 = nn.LayerNorm(dim_hidden[-1])
-        elif output_norm == "none":
-            norm1 = nn.Sequential()
-            norm2 = nn.Sequential()
-            norm3 = nn.Sequential()
-        else:
-            raise ValueError(f"{output_norm} is not a valid norm type.")
-
         self.net = nn.Sequential(
             Pass(nn.Linear(dim_input, dim_hidden[0]), dim=1),
             *[
                 attention_block(dim_hidden[i], num_heads[i])
                 for i in range(num_layers)
             ],
-            Pass(nn.Linear(dim_hidden[-1], 1), dim=1)
+            Pass(nn.Linear(dim_hidden[-1], 1), dim=1),
         )
 
         self.group = group
