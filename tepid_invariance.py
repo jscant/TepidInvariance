@@ -39,4 +39,3 @@ if __name__ == '__main__':
     feats = torch.randn(32, 20, 12).cuda()
     mask = torch.ones(32, 20).byte().cuda()
     print(model((coords, feats, mask)))
-    import pypdb

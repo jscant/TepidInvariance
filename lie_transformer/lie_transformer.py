@@ -7,11 +7,11 @@ import torch
 import wandb
 import yaml
 from eqv_transformer.eqv_attention import EquivariantTransformerBlock
-from eqv_transformer.utils import Swish
 from lie_conv.lieGroups import SE3
 from lie_conv.utils import Pass
-from utils import get_eta, format_time, print_with_overwrite
 from torch import nn
+
+from utils import get_eta, format_time, print_with_overwrite
 
 
 class PointNeuralNetwork(nn.Module):
@@ -385,13 +385,4 @@ class LieTepid(PointNeuralNetwork):
                     self.lie_algebra_nonlinearity(pairs_norm / 7) / pairs_norm
             ).unsqueeze(-1)
 
-        for layer in self.net:
-            print('Input:', *[i.shape for i in lifted_data])
-            lifted_data = layer(lifted_data)
-            print()
-            if isinstance(lifted_data, torch.Tensor):
-                print(layer.__class__.__name__, lifted_data.shape)
-            else:
-                print(layer.__class__.__name__, *[i.shape for i in lifted_data])
-        raise
-        return lifted_data
+        return self.net(lifted_data)
