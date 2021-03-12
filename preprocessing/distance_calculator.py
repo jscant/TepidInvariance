@@ -723,6 +723,7 @@ class DistanceCalculator:
         df["z"] = zs
 
         rec_coords = df.to_numpy()
+        taken_names = set()
         for idx, ligand in enumerate(ligands):
             df = pd.DataFrame()
             df['x'] = xs
@@ -734,6 +735,12 @@ class DistanceCalculator:
             mol_name = ligand.GetProp('_Name')
             if mol_name is None:  # Do I trust RDKit to fail?
                 mol_name = 'MOL_{}'.format(idx)
+            suffix_template = '_{}'
+            mol_index = 0
+            while mol_name + suffix_template.format(mol_index) in taken_names:
+                mol_index += 1
+            mol_name = mol_name + suffix_template.format(mol_index)
+            taken_names.add(mol_name)
             out_name = mol_name + '.parquet'
             output_path.mkdir(parents=True, exist_ok=True)
             df.to_parquet(output_path / out_name)

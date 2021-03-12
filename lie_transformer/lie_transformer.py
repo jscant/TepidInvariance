@@ -17,7 +17,8 @@ from utils import get_eta, format_time, print_with_overwrite
 class PointNeuralNetwork(nn.Module):
 
     def __init__(self, save_path, learning_rate, weight_decay=None,
-                 wandb_project=None, wandb_run=None, **model_kwargs):
+                 mode='classification', wandb_project=None, wandb_run=None,
+                 **model_kwargs):
         super().__init__()
         self.batch = 0
         self.epoch = 0
@@ -26,6 +27,7 @@ class PointNeuralNetwork(nn.Module):
         self.save_path = Path(save_path).expanduser()
         self.save_path.mkdir(parents=True, exist_ok=True)
         self.predictions_file = self.save_path / 'predictions.txt'
+        self.mode = mode
 
         self.loss_plot_file = self.save_path / 'loss.png'
 
@@ -36,13 +38,16 @@ class PointNeuralNetwork(nn.Module):
 
         self.loss_log_file = self.save_path / 'loss.log'
 
-        self.cross_entropy = nn.CrossEntropyLoss()
+        if mode == 'classification':
+            self.loss = nn.CrossEntropyLoss()
+        else:
+            self.loss = nn.MSELoss()
 
         self.wandb_project = wandb_project
         self.wandb_path = self.save_path / 'wandb_{}'.format(wandb_project)
         self.wandb_run = wandb_run
 
-        self.build_net(**model_kwargs)
+        self.build_net(mode=mode, **model_kwargs)
         self.optimiser = torch.optim.Adam(
             self.parameters(), lr=self.lr, weight_decay=weight_decay)
 
@@ -64,13 +69,9 @@ class PointNeuralNetwork(nn.Module):
     def _process_inputs(self, x):
         return x.cuda()
 
-    def _get_loss(self, y_true, y_pred, scale=None):
-        loss = self.cross_entropy(y_pred, y_true.long())
-        self.bce_loss = loss
+    def _get_loss(self, y_true, y_pred):
+        loss = self.loss(y_pred, y_true)
         return loss
-
-    def forward_pass(self, x):
-        return self.forward(x)
 
     def optimise(self, data_loader, epochs=1, opt_cycle=-1):
         """Train the network.
@@ -92,40 +93,28 @@ class PointNeuralNetwork(nn.Module):
             aggrigation_interval = 32
         else:
             aggrigation_interval = 1
-        decoy_mean_pred, active_mean_pred = [], []
-        loss = 0.0
-        bce_loss = 0.0
+        loss = torch.FloatTensor([0.0]).cuda()
+        if self.mode == 'classification':
+            loss_type = 'Binary crossentropy'
+        else:
+            loss_type = 'MSE'
         for self.epoch in range(epochs):
-            for self.batch, (x, y_true, ligands, receptors) in enumerate(
+            for self.batch, (x, y_true, filenames) in enumerate(
                     data_loader):
 
                 x = self._process_inputs(x)
                 y_true = self._get_y_true(y_true).cuda()
-                y_pred = self.forward_pass(x)
-
-                y_true_np = y_true.cpu().detach().numpy()
-                y_pred_np = nn.Softmax(dim=1)(y_pred).cpu().detach().numpy()
-
-                active_idx = (np.where(y_true_np > 0.5), 1)
-                decoy_idx = (np.where(y_true_np < 0.5), 1)
-
-                scale = len(y_true) / len(data_loader)
-                loss += self._get_loss(y_true, y_pred, scale)
-                bce_loss += float(self.bce_loss)
-
-                if len(active_idx[0][0]):
-                    active_mean_pred.append(np.mean(y_pred_np[active_idx]))
-                if len(decoy_idx[0][0]):
-                    decoy_mean_pred.append(np.mean(y_pred_np[decoy_idx]))
+                y_pred = self(x).cuda()
+                loss += self._get_loss(y_true, y_pred)
 
                 if not (self.batch + 1) % aggrigation_interval:
                     self.optimiser.zero_grad()
                     loss /= aggrigation_interval
-                    bce_loss /= aggrigation_interval
                     reported_batch = (self.batch + 1) // aggrigation_interval
                     loss.backward()
+                    loss = float(loss)
                     self.optimiser.step()
-                    self.losses.append(bce_loss)
+                    self.losses.append(loss)
 
                     if not (reported_batch + 1) % log_interval or \
                             self.batch == total_iters - 1:
@@ -141,14 +130,10 @@ class PointNeuralNetwork(nn.Module):
                         suffix = '(train)'
                     wandb_update_dict = {
                         'Time remaining ' + suffix: eta,
-                        'Binary crossentropy ' + suffix: (
-                            bce_loss),
+                        '{} '.format(loss_type) + suffix: (
+                            loss),
                         'Batch ' + suffix:
                             (self.epoch * len(data_loader) + reported_batch),
-                        'Mean decoy prediction (train)': np.mean(
-                            decoy_mean_pred),
-                        'Mean active prediction (train)': np.mean(
-                            active_mean_pred),
                     }
                     try:
                         wandb.log(wandb_update_dict)
@@ -163,16 +148,10 @@ class PointNeuralNetwork(nn.Module):
                                 reported_batch, len(data_loader))),
                         ('Time elapsed:', time_elapsed, '|',
                          'Time remaining:', eta),
-                        ('Loss: {0:.4f}'.format(bce_loss), '|',
-                         'Mean active: {0:.4f}'.format(np.mean(
-                             active_mean_pred)), '|',
-                         'Mean decoy: {0:.4f}'.format(np.mean(
-                             decoy_mean_pred)))
+                        ('{0}: {1:.4f}'.format(loss_type, loss),)
                     )
 
-                    bce_loss = 0.0
                     loss = 0.0
-                    decoy_mean_pred, active_mean_pred = [], []
 
             # save after each epoch
             self.save()
@@ -322,7 +301,7 @@ class LieTepid(PointNeuralNetwork):
     def _process_inputs(self, x):
         return tuple([ten.cuda() for ten in x])
 
-    def build_net(self, dim_input, dim_output, dim_hidden, num_layers,
+    def build_net(self, dim_input, dim_hidden, num_layers, mode,
                   num_heads, global_pool=True, global_pool_mean=True,
                   group=SE3(0.2), liftsamples=1, block_norm="layer_pre",
                   output_norm="none", kernel_norm="none", kernel_type="mlp",
@@ -351,6 +330,8 @@ class LieTepid(PointNeuralNetwork):
                 for i in range(num_layers)
             ],
             Pass(nn.Linear(dim_hidden[-1], 1), dim=1),
+            Pass(nn.Sigmoid(), dim=1) if mode == 'classification' \
+                else nn.Sequential()
         )
 
         self.group = group
@@ -385,4 +366,4 @@ class LieTepid(PointNeuralNetwork):
                     self.lie_algebra_nonlinearity(pairs_norm / 7) / pairs_norm
             ).unsqueeze(-1)
 
-        return self.net(lifted_data)
+        return self.net(lifted_data)[1][..., -1]

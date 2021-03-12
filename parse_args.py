@@ -97,4 +97,8 @@ def parse_args():
     parser.add_argument('--dropout', type=float, default=0.0,
                         help='Chance for nodes to be inactivated on each '
                              'trainin batch (LieTransformer)')
+    parser.add_argument('--binary_threshold', type=float,
+                        help='Threshold for distance in binary classification. '
+                             'If unspecified, the distance value will be used '
+                             'for regression instead.')
     return parser.parse_args()
