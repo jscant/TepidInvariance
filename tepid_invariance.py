@@ -2,6 +2,7 @@ import random
 
 import numpy as np
 import torch
+import wandb
 from lie_conv.lieGroups import SE3
 
 from lie_transformer.lie_transformer import LieTepid
@@ -34,6 +35,7 @@ if __name__ == '__main__':
         'lie_algebra_nonlinearity': None,
         'dropout': args.dropout
     }
+
     torch.manual_seed(0)
     random.seed(0)
     np.random.seed(0)
@@ -42,5 +44,17 @@ if __name__ == '__main__':
     dl = torch.utils.data.DataLoader(
         ds, shuffle=True, batch_size=args.batch_size, collate_fn=ds.collate)
     mode = 'regression' if args.binary_threshold is None else 'classification'
-    model = LieTepid(args.save_path, 0.001, 1e-6, mode=mode, **model_kwargs)
+    model = LieTepid(args.save_path, args.learning_rate, args.weight_decay,
+                     mode=mode, **model_kwargs)
+    if args.wandb_project is not None:
+        args_to_record = vars(args)
+        args_to_record.update(model_kwargs)
+        wandb_init_kwargs = {
+            'project': args.wandb_project, 'allow_val_change': True,
+            'config': args_to_record
+        }
+        wandb.init(**wandb_init_kwargs)
+        if args.wandb_run is not None:
+            wandb.run.name = args.wandb_run
+        wandb.watch(model)
     model.optimise(dl, 1)

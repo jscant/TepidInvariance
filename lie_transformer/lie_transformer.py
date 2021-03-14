@@ -23,7 +23,6 @@ class PointNeuralNetwork(nn.Module):
         self.batch = 0
         self.epoch = 0
         self.losses = []
-        self.final_activation = nn.CrossEntropyLoss()
         self.save_path = Path(save_path).expanduser()
         self.save_path.mkdir(parents=True, exist_ok=True)
         self.predictions_file = self.save_path / 'predictions.txt'
@@ -39,7 +38,7 @@ class PointNeuralNetwork(nn.Module):
         self.loss_log_file = self.save_path / 'loss.log'
 
         if mode == 'classification':
-            self.loss = nn.CrossEntropyLoss()
+            self.loss = nn.BCELoss()
         else:
             self.loss = nn.MSELoss()
 
