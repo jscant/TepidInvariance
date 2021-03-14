@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+import yaml
 from torch.utils.data import SubsetRandomSampler
 
 from preprocessing.preprocessing import make_bit_vector
@@ -55,10 +56,42 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
 
         self.base_path = Path(base_path).expanduser()
         self.filenames = list(self.base_path.glob('**/*.parquet'))
+        receptors = set()
+        ligand_coordinate_info = {}
+        for filename in self.filenames:
+            receptors.add(filename.parent)
+        for receptor in receptors:
+            ligand_coordinate_statistics_filename = Path(
+                receptor, 'ligand_centres.yaml')
+            try:
+                with open(ligand_coordinate_statistics_filename, 'r') as f:
+                    ligand_coordinate_info[receptor.name] = yaml.load(
+                        f, yaml.FullLoader)
+            except FileNotFoundError:
+                print(
+                    '{0} not found. Will use entire protein for receptor {1} ('
+                    'no bounding box/truncation'
+                    ')'.format(ligand_coordinate_statistics_filename, receptor))
+        self.ligand_coordinate_info = ligand_coordinate_info
 
     def __len__(self):
         """Returns the total size of the dataset."""
         return len(self.filenames)
+
+    def centre_and_truncate(self, filename, radius=12):
+        rec_name = filename.parent.name
+        lig_name = filename.name
+        struct = pd.read_parquet(filename)
+        mean_coords = self.ligand_coordinate_info[rec_name][lig_name]
+        mean_x, mean_y, mean_z = mean_coords
+        struct['x'] -= mean_x
+        struct['y'] -= mean_y
+        struct['z'] -= mean_z
+        struct['sq_dist'] = (struct['x'] ** 2 +
+                             struct['y'] ** 2 +
+                             struct['z'] ** 2)
+        struct = struct[struct.sq_dist < radius ** 2].copy()
+        return struct
 
     def __getitem__(self, item):
         """Given an index, locate and preprocess relevant parquets files.
@@ -73,12 +106,14 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         """
 
         filename = self.filenames[item]
-        struct = pd.read_parquet(filename)
+
+        struct = self.centre_and_truncate(filename, radius=12)
 
         p = torch.from_numpy(np.expand_dims(self.rot(
             struct[struct.columns[:3]].to_numpy()), 0))
         v = torch.unsqueeze(make_bit_vector(struct.types.to_numpy(), 11), 0)
         m = torch.from_numpy(np.ones((1, len(struct))))
+
         if self.binary_threshold is None:
             dist = torch.from_numpy(struct.dist.to_numpy())
         else:
@@ -116,6 +151,6 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
             p_batch[batch_index, :p.shape[1], :] = p
             v_batch[batch_index, :v.shape[1], :] = v
             m_batch[batch_index, :m.shape[1]] = m
-            label_batch[batch_index, :label_batch.shape[1]] = dist
+            label_batch[batch_index, :dist.shape[0]] = dist
             filenames.append(filename)
         return (p_batch, v_batch, m_batch.bool()), label_batch, filenames

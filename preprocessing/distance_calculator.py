@@ -8,27 +8,34 @@ import numpy as np
 import openbabel
 import pandas as pd
 import pybel
+import yaml
 from Bio.SeqUtils import seq1
 from rdkit import Chem
+from rdkit import RDLogger
 from scipy.spatial.distance import cdist
 
 
-def get_aromatic_atom_coords(mol):
+def get_aromatic_atom_coords(rdkit_mol):
     aromatics_indices = set()
-    rings = mol.GetRingInfo().AtomRings()
+    rings = rdkit_mol.GetRingInfo().AtomRings()
     for ring in rings:
         for atom in ring:
-            if mol.GetAtomWithIdx(atom).GetIsAromatic():
+            if rdkit_mol.GetAtomWithIdx(atom).GetIsAromatic():
                 aromatics_indices.add(atom)
     aromatics_indices = np.array(list(aromatics_indices), dtype=np.int32)
 
-    return get_positions(mol)[aromatics_indices]
+    return get_positions(rdkit_mol)[aromatics_indices]
 
 
 # conf.GetPositions often segfaults (RDKit bug)
-def get_positions(mol):
-    conf = mol.GetConformer(0)
-    return np.array([conf.GetAtomPosition(i) for i in range(mol.GetNumAtoms())])
+def get_positions(rdkit_mol):
+    conf = rdkit_mol.GetConformer(0)
+    return np.array(
+        [conf.GetAtomPosition(i) for i in range(rdkit_mol.GetNumAtoms())])
+
+
+def get_centre_coordinates(rdkit_mol):
+    return np.mean(get_positions(rdkit_mol), axis=0)
 
 
 def identity_filter(mol):
@@ -685,6 +692,8 @@ class DistanceCalculator:
 
     def calculate_distances_and_write_parqets(
             self, rec_fname, lig_fname, output_path):
+        RDLogger.DisableLog('*')
+        pybel.ob.obErrorLog.SetOutputLevel(0)
         output_path = Path(output_path).expanduser()
 
         ligands = Chem.SDMolSupplier(lig_fname)
@@ -724,39 +733,86 @@ class DistanceCalculator:
 
         rec_coords = df.to_numpy()
         taken_names = set()
+        rddkit_failure = 0
+        total = 0
+        no_aromatics = 0
+        other_failure = 0
+        ligand_centres = {}
         for idx, ligand in enumerate(ligands):
-            df = pd.DataFrame()
-            df['x'] = xs
-            df['y'] = ys
-            df['z'] = zs
-            df['types'] = types
-            df['dist'] = self.distance_to_closest_aromatic(
-                rec_coords, ligand, get_aromatic_atom_coords)
-            mol_name = ligand.GetProp('_Name')
-            if mol_name is None:  # Do I trust RDKit to fail?
-                mol_name = 'MOL_{}'.format(idx)
-            suffix_template = '_{}'
-            mol_index = 0
-            while mol_name + suffix_template.format(mol_index) in taken_names:
-                mol_index += 1
-            mol_name = mol_name + suffix_template.format(mol_index)
-            taken_names.add(mol_name)
-            out_name = mol_name + '.parquet'
-            output_path.mkdir(parents=True, exist_ok=True)
-            df.to_parquet(output_path / out_name)
+            try:
+                df = pd.DataFrame()
+                df['x'] = xs
+                df['y'] = ys
+                df['z'] = zs
+                df['types'] = types
+                df['dist'] = self.distance_to_closest_aromatic(
+                    rec_coords, ligand, get_aromatic_atom_coords)
+                mol_name = ligand.GetProp('_Name')
+                if mol_name is None:  # Do I trust RDKit to fail?
+                    mol_name = 'MOL_{}'.format(idx)
+                suffix_template = '_{}'
+                mol_index = 0
+                while mol_name + suffix_template.format(
+                        mol_index) in taken_names:
+                    mol_index += 1
+                mol_name = mol_name + suffix_template.format(mol_index)
+                taken_names.add(mol_name)
+                out_name = mol_name + '.parquet'
+                output_path.mkdir(parents=True, exist_ok=True)
+                df.to_parquet(output_path / out_name)
+
+                # Yaml doesn't like np.float64 types or arrays
+                ligand_centres[out_name] = [float(i) for i in
+                                            get_centre_coordinates(ligand)]
+            except AttributeError:
+                rddkit_failure += 1
+            except ValueError:
+                no_aromatics += 1
+            except:
+                other_failure += 1
+            total += 1
+
+        with open(output_path / 'ligand_centres.yaml', 'w') as f:
+            yaml.dump(ligand_centres, f)
+
+        print('Failed structures:', rddkit_failure, '/', total)
+        print('No aromatics:', no_aromatics, '/', total)
+        print('Other errors:', other_failure, '/', total)
+
+        output_stats_fname = output_path.parent / 'rdkit_stats.log'
+        if not output_stats_fname.is_file():
+            with open(output_stats_fname, 'w') as f:
+                f.write(
+                    'total_structures\trdkit_fail\tno_aromatics\tother_fail\n')
+
+        with open(output_stats_fname, 'a') as f:
+            f.write('\t'.join(map(str, [total, rddkit_failure,
+                                        no_aromatics, other_failure])) + '\n')
+
+    def process_all_in_directory(self, base_path, output_path):
+        base_path = Path(base_path)
+        ligs = base_path.glob('ligands/*/*.sdf')
+        for lig in ligs:
+            rec_name = lig.parent.name
+            rec = lig.parents[2] / 'receptors' / rec_name / 'receptor.pdb'
+            self.calculate_distances_and_write_parqets(
+                str(rec), str(lig), Path(output_path, rec_name))
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('receptor', type=str,
                         help='PDB file containing receptor atom coordinates')
-    parser.add_argument('ligand', type=str,
+    parser.add_argument('output_path', type=str, nargs='?',
+                        help='Directory in which to save output')
+    parser.add_argument('--ligand', '-l', type=str,
                         help='SDF file containing ligand coordinates (possibly '
                              'multiple molecules)')
-    parser.add_argument('output_path', type=str,
-                        help='Directory in which to save output')
     args = parser.parse_args()
 
     dt = DistanceCalculator()
-    dt.calculate_distances_and_write_parqets(
-        args.receptor, args.ligand, args.output_path)
+    if args.ligand is not None:
+        dt.calculate_distances_and_write_parqets(
+            args.receptor, args.ligand, args.output_path)
+    else:
+        dt.process_all_in_directory(args.receptor, args.output_path)
