@@ -1,3 +1,6 @@
+import random
+
+import numpy as np
 import torch
 from lie_conv.lieGroups import SE3
 
@@ -31,7 +34,9 @@ if __name__ == '__main__':
         'lie_algebra_nonlinearity': None,
         'dropout': args.dropout
     }
-
+    torch.manual_seed(0)
+    random.seed(0)
+    np.random.seed(0)
     ds = LieTransformerLabelledAtomsDataset(
         args.train_data_root, binary_threshold=args.binary_threshold)
     dl = torch.utils.data.DataLoader(
