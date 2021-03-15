@@ -255,7 +255,6 @@ class PointNeuralNetwork(nn.Module):
             'weight_decay': self.weight_decay,
             'epoch': self.epoch,
             'losses': self.losses,
-            'bce_loss': self.bce_loss,
             'model_state_dict': self.state_dict(),
             'optimiser_state_dict': self.optimiser.state_dict()
         }, save_path)
