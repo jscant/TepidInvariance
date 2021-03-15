@@ -58,4 +58,4 @@ if __name__ == '__main__':
         if args.wandb_run is not None:
             wandb.run.name = args.wandb_run
         wandb.watch(model)
-    model.optimise(dl, 1)
+    model.optimise(dl, args.epochs)
