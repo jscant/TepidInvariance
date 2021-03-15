@@ -14,6 +14,10 @@ from torch import nn
 from utils import get_eta, format_time, print_with_overwrite
 
 
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+
 class PointNeuralNetwork(nn.Module):
 
     def __init__(self, save_path, learning_rate, weight_decay=None,
@@ -92,24 +96,57 @@ class PointNeuralNetwork(nn.Module):
             aggrigation_interval = 32
         else:
             aggrigation_interval = 1
-        loss = torch.FloatTensor([0.0]).cuda()
         if self.mode == 'classification':
             loss_type = 'Binary crossentropy'
         else:
             loss_type = 'MSE'
         for self.epoch in range(epochs):
+            loss = torch.FloatTensor([0.0]).cuda()
+            mean_positive_prediction, mean_negative_prediction = 0., 0.
             for self.batch, (x, y_true, filenames) in enumerate(
                     data_loader):
 
                 x = self._process_inputs(x)
                 y_true = self._get_y_true(y_true).cuda()
                 y_pred = self(x).cuda()
+
+                y_pred_np = torch.sigmoid(y_pred).cpu().detach().numpy()
+                y_true_np = y_true.cpu().detach().numpy()
+                positive_indices = np.where(y_true_np > 0.5)
+                negative_indices = np.where(y_true_np < 0.5)
+                mean_positive_prediction += np.mean(y_pred_np[positive_indices])
+                mean_negative_prediction += np.mean(y_pred_np[negative_indices])
+
                 loss += self._get_loss(y_true, y_pred)
 
                 if not (self.batch + 1) % aggrigation_interval:
                     self.optimiser.zero_grad()
                     loss /= aggrigation_interval
-                    reported_batch = (self.batch + 1) // aggrigation_interval
+                    reported_batch = (self.batch + 1) // aggrigation_interval  #
+                    eta = get_eta(start_time, global_iter, total_iters)
+                    time_elapsed = format_time(time.time() - start_time)
+                    wandb_update_dict = {
+                        'Time remaining (train)': eta,
+                        '{} (train)'.format(loss_type): float(loss),
+                        'Batch (train)':
+                            (self.epoch * len(data_loader) + reported_batch),
+                    }
+                    if self.mode == 'classification':
+                        mean_positive_prediction /= aggrigation_interval
+                        mean_negative_prediction /= aggrigation_interval
+                        wandb_update_dict.update({
+                            'Mean positive prediction':
+                                mean_positive_prediction,
+                            'Mean negative prediction':
+                                mean_negative_prediction
+                        })
+                        mean_positive_prediction = '{0:.4f}'.format(
+                            mean_positive_prediction)
+                        mean_negative_prediction = '{0:.4f}'.format(
+                            mean_negative_prediction)
+                    else:
+                        mean_positive_prediction = 'n/a',
+                        mean_negative_prediction = 'n/a'
                     loss.backward()
                     loss = float(loss)
                     self.optimiser.step()
@@ -120,20 +157,6 @@ class PointNeuralNetwork(nn.Module):
                         self.save_loss(log_interval)
                     global_iter += 1
 
-                    eta = get_eta(start_time, global_iter, total_iters)
-                    time_elapsed = format_time(time.time() - start_time)
-
-                    if opt_cycle >= 0:
-                        suffix = '(train, cycle {})'.format(opt_cycle)
-                    else:
-                        suffix = '(train)'
-                    wandb_update_dict = {
-                        'Time remaining ' + suffix: eta,
-                        '{} '.format(loss_type) + suffix: (
-                            loss),
-                        'Batch ' + suffix:
-                            (self.epoch * len(data_loader) + reported_batch),
-                    }
                     try:
                         wandb.log(wandb_update_dict)
                     except wandb.errors.error.Error:
@@ -145,11 +168,15 @@ class PointNeuralNetwork(nn.Module):
                             '{0}/{1}'.format(self.epoch + 1, epochs),
                             '|', 'Batch:', '{0}/{1}'.format(
                                 reported_batch, len(data_loader))),
+                        ('Mean prediction (positive | negative):',
+                         mean_positive_prediction, '|',
+                         mean_negative_prediction),
                         ('Time elapsed:', time_elapsed, '|',
                          'Time remaining:', eta),
                         ('{0}: {1:.4f}'.format(loss_type, loss),)
                     )
 
+                    mean_positive_prediction, mean_negative_prediction = 0., 0.
                     loss = 0.0
 
             # save after each epoch
