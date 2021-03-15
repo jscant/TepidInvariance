@@ -41,9 +41,10 @@ if __name__ == '__main__':
     np.random.seed(0)
     ds = LieTransformerLabelledAtomsDataset(
         args.train_data_root, binary_threshold=args.binary_threshold,
-        max_suffix=args.max_suffix)
+        radius=args.radius, max_suffix=args.max_suffix, inverse=args.inverse)
     dl = torch.utils.data.DataLoader(
-        ds, shuffle=True, batch_size=args.batch_size, collate_fn=ds.collate)
+        ds, shuffle=True, batch_size=args.batch_size, collate_fn=ds.collate,
+        drop_last=True)
     mode = 'regression' if args.binary_threshold is None else 'classification'
     model = LieTepid(args.save_path, args.learning_rate, args.weight_decay,
                      mode=mode, **model_kwargs)

@@ -145,7 +145,7 @@ class PointNeuralNetwork(nn.Module):
                         mean_negative_prediction = '{0:.4f}'.format(
                             mean_negative_prediction)
                     else:
-                        mean_positive_prediction = 'n/a',
+                        mean_positive_prediction = 'n/a'
                         mean_negative_prediction = 'n/a'
                     loss.backward()
                     loss = float(loss)

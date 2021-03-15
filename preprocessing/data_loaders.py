@@ -35,7 +35,7 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
     """Class for feeding structure parquets into network."""
 
     def __init__(self, base_path, rot=False, binary_threshold=None,
-                 max_suffix=np.inf, **kwargs):
+                 max_suffix=np.inf, radius=12, inverse=False, **kwargs):
         """Initialise dataset.
         Arguments:
             base_path: path containing the 'receptors' and 'ligands'
@@ -54,6 +54,8 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         super().__init__(**kwargs)
         self.binary_threshold = binary_threshold
         self.rot = random_rotation if rot else lambda x: x
+        self.radius = radius
+        self.inverse = inverse
 
         self.base_path = Path(base_path).expanduser()
         self.filenames = [f for f in self.base_path.glob('**/*.parquet') if
@@ -77,7 +79,7 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
                     ')'.format(ligand_coordinate_statistics_filename, receptor))
         self.ligand_coordinate_info = ligand_coordinate_info
 
-    def centre_and_truncate(self, filename, radius=12):
+    def centre_and_truncate(self, filename):
         """Centre atomic coordinates on mean ligand atom position and truncate.
 
         Coordinates are centred on the mean atom position, calculated when the
@@ -87,8 +89,6 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         Arguments:
             filename: name of parquet file containing coordinate, atom type and
                 minimum distance from ligand atom of interest information
-            radius:
-                cutoff distance, beyond which protein atoms are discarded
 
         Returns:
             pandas.Dataframe object containing the x, y and z coordinates of
@@ -107,7 +107,12 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         struct['sq_dist'] = (struct['x'] ** 2 +
                              struct['y'] ** 2 +
                              struct['z'] ** 2)
-        struct = struct[struct.sq_dist < radius ** 2].copy()
+
+        if self.inverse:
+            struct['dist'] = np.maximum(
+                np.ones((len(struct),)), 1 / struct['dist'])
+
+        struct = struct[struct.sq_dist < self.radius ** 2].copy()
         return struct
 
     def __len__(self):
@@ -128,7 +133,7 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
 
         filename = self.filenames[item]
 
-        struct = self.centre_and_truncate(filename, radius=12)
+        struct = self.centre_and_truncate(filename)
 
         p = torch.from_numpy(np.expand_dims(self.rot(
             struct[struct.columns[:3]].to_numpy()), 0))
@@ -149,12 +154,14 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
     @staticmethod
     def collate(batch):
         """Processing of inputs which takes place after batch is selected.
+
         LieConv networks take tuples of torch tensors (p, v, m), which are:
             p, (batch_size, n_atoms, 3): coordinates of each atom
             v, (batch_size, n_atoms, n_features): features for each atom
             m, (batch_size, n_atoms): mask for each coordinate slot
         Note that n_atoms is the largest number of atoms in a structure in
-        each batch.
+        each batch. LieTransformer networks take the first two of these (p, v).
+
         Arguments:
             batch: iterable of individual inputs.
         Returns:
