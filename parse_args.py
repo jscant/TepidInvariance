@@ -101,4 +101,8 @@ def parse_args():
                         help='Threshold for distance in binary classification. '
                              'If unspecified, the distance value will be used '
                              'for regression instead.')
+    parser.add_argument('--max_suffix', type=int, default=np.inf,
+                        help='Maximum integer at end of filename: for example, '
+                             'CHEMBL123456_4.parquet would be included with '
+                             '<--max_suffix 4> but not <--max_suffix 3>.')
     return parser.parse_args()

@@ -40,7 +40,8 @@ if __name__ == '__main__':
     random.seed(0)
     np.random.seed(0)
     ds = LieTransformerLabelledAtomsDataset(
-        args.train_data_root, binary_threshold=args.binary_threshold)
+        args.train_data_root, binary_threshold=args.binary_threshold,
+        max_suffix=args.max_suffix)
     dl = torch.utils.data.DataLoader(
         ds, shuffle=True, batch_size=args.batch_size, collate_fn=ds.collate)
     mode = 'regression' if args.binary_threshold is None else 'classification'

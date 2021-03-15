@@ -34,7 +34,8 @@ def one_hot(numerical_category, num_classes):
 class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
     """Class for feeding structure parquets into network."""
 
-    def __init__(self, base_path, rot=False, binary_threshold=None, **kwargs):
+    def __init__(self, base_path, rot=False, binary_threshold=None,
+                 max_suffix=np.inf, **kwargs):
         """Initialise dataset.
         Arguments:
             base_path: path containing the 'receptors' and 'ligands'
@@ -55,7 +56,9 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         self.rot = random_rotation if rot else lambda x: x
 
         self.base_path = Path(base_path).expanduser()
-        self.filenames = list(self.base_path.glob('**/*.parquet'))
+        self.filenames = [f for f in self.base_path.glob('**/*.parquet') if
+                          int(Path(f.name).stem.split('_')[-1]) <= max_suffix]
+
         receptors = set()
         ligand_coordinate_info = {}
         for filename in self.filenames:
