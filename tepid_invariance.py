@@ -14,7 +14,7 @@ from preprocessing.data_loaders import LieTransformerLabelledAtomsDataset
 if __name__ == '__main__':
     args = parse_args()
     args.save_path.expanduser().mkdir(parents=True, exist_ok=True)
-    
+
     with open(args.save_path.expanduser() / 'cmd_line_args.yaml', 'w') as f:
         yaml.dump(vars(args), f)
 
