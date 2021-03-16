@@ -5,8 +5,8 @@ setup(
     version='0.0.1',
     description='SE(3)-equivariant neural networks for hotspot prediction.',
     author='Jack Scantlebury',
-    packages=['tepid_invariance'],
-    package_dir={'': 'tepid_invariance'},
+    packages=[''],
+    package_dir={'': ''},
     install_requires=[
         'torch',
         'numpy',
