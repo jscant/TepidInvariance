@@ -6,7 +6,7 @@ import wandb
 import yaml
 from lie_conv.lieGroups import SE3
 
-from lie_transformer.lie_transformer import LieTepid
+from models.lie_transformer import LieTransformer
 from parse_args import parse_args
 from preprocessing.data_loaders import LieTransformerLabelledAtomsDataset
 
@@ -14,7 +14,7 @@ if __name__ == '__main__':
     args = parse_args()
 
     model_kwargs = {
-        'dim_input': 11,
+        'dim_input': 12,
         'dim_hidden': args.channels,
         'num_layers': args.layers,
         'num_heads': 8,
@@ -47,8 +47,9 @@ if __name__ == '__main__':
         ds, shuffle=True, batch_size=args.batch_size, collate_fn=ds.collate,
         drop_last=True)
     mode = 'regression' if args.binary_threshold is None else 'classification'
-    model = LieTepid(args.save_path, args.learning_rate, args.weight_decay,
-                     mode=mode, **model_kwargs)
+    model = LieTransformer(
+        args.save_path, args.learning_rate, args.weight_decay, mode=mode,
+        **model_kwargs)
     if args.wandb_project is not None:
         args_to_record = vars(args)
         args_to_record.update(model_kwargs)

@@ -7,7 +7,7 @@ from torch import nn
 from models.point_neural_network import PointNeuralNetwork
 
 
-class LieTepid(PointNeuralNetwork):
+class LieTransformer(PointNeuralNetwork):
     """Adapted from https://github.com/anonymous-code-0/lie-transformer"""
 
     def _process_inputs(self, x):

@@ -346,7 +346,7 @@ class PointNeuralNetwork(nn.Module):
             np.vstack([df['x'], df['y'], df['z']]).T).float()
         coords = repeat(coords, 'a b -> n a b', n=2)
         feats = F.one_hot(
-            torch.from_numpy(df['types'].to_numpy()), num_classes=11).float()
+            torch.from_numpy(df['types'].to_numpy()), num_classes=12).float()
         feats = repeat(feats, 'a b -> n a b', n=2)
         mask = torch.ones(2, feats.shape[1]).byte()
 
@@ -371,3 +371,8 @@ class PointNeuralNetwork(nn.Module):
         io = PDB.PDBIO()
         io.set_structure(receptor_bp)
         io.save(output_fname)
+
+        print()
+        print('Receptor:', rec_fname)
+        print('Ligand:', lig_fname)
+        print('Output:', output_fname)
