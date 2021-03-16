@@ -346,7 +346,7 @@ class PointNeuralNetwork(nn.Module):
             np.vstack([df['x'], df['y'], df['z']]).T).float()
         coords = repeat(coords, 'a b -> n a b', n=2)
         feats = F.one_hot(
-            torch.from_numpy(df['types'].to_numpy()), num_classes=12).float()
+            torch.from_numpy(df['types'].to_numpy()), num_classes=11).float()
         feats = repeat(feats, 'a b -> n a b', n=2)
         mask = torch.ones(2, feats.shape[1]).byte()
 
