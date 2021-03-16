@@ -1,16 +1,25 @@
 import time
 from abc import abstractmethod
+from collections import defaultdict
 from pathlib import Path
 
+import Bio.PDB as PDB
 import numpy as np
+import pandas as pd
+import pybel
 import torch
+import torch.nn.functional as F
 import wandb
 import yaml
+from einops import repeat
 from eqv_transformer.eqv_attention import EquivariantTransformerBlock
 from lie_conv.lieGroups import SE3
 from lie_conv.utils import Pass
+from rdkit import Chem, RDLogger
 from torch import nn
 
+from preprocessing.distance_calculator import DistanceCalculator, \
+    get_centre_coordinates
 from utils import get_eta, format_time, print_with_overwrite
 
 
@@ -42,7 +51,7 @@ class PointNeuralNetwork(nn.Module):
         self.loss_log_file = self.save_path / 'loss.log'
 
         if mode == 'classification':
-            self.loss = nn.BCELoss()
+            self.loss = nn.BCEWithLogitsLoss()
         else:
             self.loss = nn.MSELoss()
 
@@ -50,7 +59,7 @@ class PointNeuralNetwork(nn.Module):
         self.wandb_path = self.save_path / 'wandb_{}'.format(wandb_project)
         self.wandb_run = wandb_run
 
-        self.build_net(mode=mode, **model_kwargs)
+        self.build_net(**model_kwargs)
         self.optimiser = torch.optim.Adam(
             self.parameters(), lr=self.lr, weight_decay=weight_decay)
 
@@ -92,6 +101,8 @@ class PointNeuralNetwork(nn.Module):
         log_interval = 10
         global_iter = 0
         self.train()
+        print()
+        print()
         if data_loader.batch_size == 1:
             aggrigation_interval = 32
         else:
@@ -103,6 +114,7 @@ class PointNeuralNetwork(nn.Module):
         for self.epoch in range(epochs):
             loss = torch.FloatTensor([0.0]).cuda()
             mean_positive_prediction, mean_negative_prediction = 0., 0.
+            n_positive, n_negative = 0, 0
             for self.batch, (x, y_true, filenames) in enumerate(
                     data_loader):
 
@@ -114,6 +126,8 @@ class PointNeuralNetwork(nn.Module):
                 y_true_np = y_true.cpu().detach().numpy()
                 positive_indices = np.where(y_true_np > 0.5)
                 negative_indices = np.where(y_true_np < 0.5)
+                n_positive += len(positive_indices[0])
+                n_negative += len(negative_indices[0])
                 mean_positive_prediction += np.mean(y_pred_np[positive_indices])
                 mean_negative_prediction += np.mean(y_pred_np[negative_indices])
 
@@ -140,13 +154,21 @@ class PointNeuralNetwork(nn.Module):
                             'Mean negative prediction':
                                 mean_negative_prediction
                         })
-                        mean_positive_prediction = '{0:.4f}'.format(
-                            mean_positive_prediction)
-                        mean_negative_prediction = '{0:.4f}'.format(
+                        y_pred_info = 'Mean prediction (positive ({0}) | ' \
+                                      'negative ({1})): {2:0.4f} | ' \
+                                      '{3:0.4f}'.format(
+                            n_positive, n_negative, mean_positive_prediction,
                             mean_negative_prediction)
                     else:
-                        mean_positive_prediction = 'n/a'
-                        mean_negative_prediction = 'n/a'
+                        mean_pred_std_dev = np.std(y_pred_np)
+                        mean_pred_mean = np.mean(y_pred_np)
+                        mean_true_std_dev = np.std(y_true_np)
+                        mean_true_mean = np.mean(y_true_np)
+                        y_pred_info = 'True mean | std: {0:0.4f} | {1:0.4f}\t' \
+                                      'Predicted mean | std: {2:0.4f} | ' \
+                                      '{3:0.4f}'.format(
+                            mean_true_mean, mean_true_std_dev, mean_pred_mean,
+                            mean_pred_std_dev)
                     loss.backward()
                     loss = float(loss)
                     self.optimiser.step()
@@ -168,9 +190,7 @@ class PointNeuralNetwork(nn.Module):
                             '{0}/{1}'.format(self.epoch + 1, epochs),
                             '|', 'Batch:', '{0}/{1}'.format(
                                 reported_batch, len(data_loader))),
-                        ('Mean prediction (positive | negative):',
-                         mean_positive_prediction, '|',
-                         mean_negative_prediction),
+                        (y_pred_info,),
                         ('Time elapsed:', time_elapsed, '|',
                          'Time remaining:', eta),
                         ('{0}: {1:.4f}'.format(loss_type, loss),)
@@ -178,6 +198,7 @@ class PointNeuralNetwork(nn.Module):
 
                     mean_positive_prediction, mean_negative_prediction = 0., 0.
                     loss = 0.0
+                    n_positive, n_negative = 0, 0
 
             # save after each epoch
             self.save()
@@ -218,7 +239,7 @@ class PointNeuralNetwork(nn.Module):
                 decoy_idx = (np.where(y_true_np < 0.5), 1)
 
                 scale = len(y_true) / len(data_loader)
-                _ = self._get_loss(y_true, y_pred, scale)
+                _ = self._get_loss(y_true, y_pred)
 
                 eta = get_eta(start_time, self.batch, len(data_loader))
                 time_elapsed = format_time(time.time() - start_time)
@@ -316,6 +337,81 @@ class PointNeuralNetwork(nn.Module):
             if m.bias is not None:
                 m.bias.data.fill_(0)
 
+    def colour_pdb(self, rec_fname, lig_fname, output_fname, radius=12):
+        RDLogger.DisableLog('*')
+        pybel.ob.obErrorLog.SetOutputLevel(0)
+        if Path(lig_fname).suffix == '.sdf':
+            for item in Chem.SDMolSupplier(str(Path(lig_fname).expanduser())):
+                centre_coords = get_centre_coordinates(item)
+                break
+        else:
+            for item in Chem.MolFromMol2File(str(Path(lig_fname).expanduser())):
+                centre_coords = get_centre_coordinates(item)
+                break
+        dc = DistanceCalculator()
+
+        rec_fname = Path(rec_fname).expanduser()
+        output_fname = str(Path(output_fname).expanduser())
+        receptor_bp = dc.read_file(rec_fname, False, read_type='biopython')
+        receptor_ob = dc.read_file(rec_fname, False, read_type='openbabel')
+
+        pos_to_idx = defaultdict(lambda: defaultdict(lambda: dict()))
+        xs, ys, zs = [], [], []
+        types, pdb_types = [], []
+        for idx, ob_atom in enumerate(receptor_ob):
+            smina_type = dc.obatom_to_smina_type(ob_atom)
+            if smina_type == "NumTypes":
+                smina_type_int = len(self.atom_type_data)
+            else:
+                smina_type_int = dc.atom_types.index(smina_type)
+            type_int = dc.type_map[smina_type_int]
+
+            ainfo = [i for i in ob_atom.coords]
+            ainfo.append(type_int)
+            str_coords = [str(i) for i in ob_atom.coords]
+            pos_to_idx[str_coords[0]][str_coords[1]][str_coords[2]] = idx
+
+            xs.append(ainfo[0] - centre_coords[0])
+            ys.append(ainfo[1] - centre_coords[1])
+            zs.append(ainfo[2] - centre_coords[2])
+            types.append(ainfo[3])
+            pdb_types.append(
+                ob_atom.residue.OBResidue.GetAtomID(ob_atom.OBAtom).strip())
+
+        xs, ys, zs = np.array(xs), np.array(ys), np.array(zs)
+        df = pd.DataFrame()
+        df['x'] = xs
+        df['y'] = ys
+        df['z'] = zs
+        df['types'] = types
+        df['atom_idx'] = np.arange(len(df))
+        df['sq_vec'] = df['x'] ** 2 + df['y'] ** 2 + df['z'] ** 2
+        df = df[df.sq_vec < radius ** 2].copy()
+        included_indices = df['atom_idx'].to_numpy()
+        coords = torch.from_numpy(
+            np.vstack([df['x'], df['y'], df['z']]).T).float()
+        coords = repeat(coords, 'a b -> n a b', n=2)
+        feats = F.one_hot(
+            torch.from_numpy(df['types'].to_numpy()), num_classes=11).float()
+        feats = repeat(feats, 'a b -> n a b', n=2)
+        mask = torch.ones(2, feats.shape[1]).byte()
+        labels = self(
+            (coords.cuda(),
+             feats.cuda(),
+             mask.cuda())
+        ).cpu().detach().numpy()[0, :].squeeze()
+        all_labels = np.zeros((len(xs),))
+        all_labels[included_indices] = labels
+
+        for atom in receptor_bp.get_atoms():
+            x, y, z = atom.get_coord()
+            ob_idx = pos_to_idx[str(x)][str(y)][str(z)]
+            atom.set_bfactor(all_labels[ob_idx])
+
+        io = PDB.PDBIO()
+        io.set_structure(receptor_bp)
+        io.save(output_fname)
+
 
 class LieTepid(PointNeuralNetwork):
     """Adapted from https://github.com/anonymous-code-0/lie-transformer"""
@@ -326,10 +422,9 @@ class LieTepid(PointNeuralNetwork):
     def _process_inputs(self, x):
         return tuple([ten.cuda() for ten in x])
 
-    def build_net(self, dim_input, dim_hidden, num_layers, mode,
-                  num_heads, global_pool=True, global_pool_mean=True,
-                  group=SE3(0.2), liftsamples=1, block_norm="layer_pre",
-                  output_norm="none", kernel_norm="none", kernel_type="mlp",
+    def build_net(self, dim_input, dim_hidden, num_layers,
+                  num_heads, group=SE3(0.2), liftsamples=1,
+                  block_norm="layer_pre", kernel_norm="none", kernel_type="mlp",
                   kernel_dim=16, kernel_act="swish", mc_samples=0, fill=1.0,
                   attention_fn="norm_exp", feature_embed_dim=None,
                   max_sample_norm=None, lie_algebra_nonlinearity=None,
@@ -354,9 +449,7 @@ class LieTepid(PointNeuralNetwork):
                 attention_block(dim_hidden[i], num_heads[i])
                 for i in range(num_layers)
             ],
-            Pass(nn.Linear(dim_hidden[-1], 1), dim=1),
-            Pass(nn.Sigmoid(), dim=1) if mode == 'classification' \
-                else nn.Sequential()
+            Pass(nn.Linear(dim_hidden[-1], 1), dim=1)
         )
 
         self.group = group
@@ -369,20 +462,21 @@ class LieTepid(PointNeuralNetwork):
                 self.lie_algebra_nonlinearity = nn.Tanh()
             else:
                 raise ValueError(
-                    f"{lie_algebra_nonlinearity} is not a supported nonlinearity"
+                    f'{lie_algebra_nonlinearity} is not a supported '
+                    f'nonlinearity'
                 )
 
-    def forward(self, input):
+    def forward(self, x):
         if self.max_sample_norm is None:
-            lifted_data = self.group.lift(input, self.liftsamples)
+            lifted_data = self.group.lift(x, self.liftsamples)
         else:
             lifted_data = [
-                torch.tensor(self.max_sample_norm * 2, device=input[0].device),
+                torch.tensor(self.max_sample_norm * 2, device=x[0].device),
                 0,
                 0,
             ]
             while lifted_data[0].norm(dim=-1).max() > self.max_sample_norm:
-                lifted_data = self.group.lift(input, self.liftsamples)
+                lifted_data = self.group.lift(x, self.liftsamples)
 
         if self.lie_algebra_nonlinearity is not None:
             lifted_data = list(lifted_data)
