@@ -10,10 +10,8 @@ from models.point_neural_network import PointNeuralNetwork
 class LieTepid(PointNeuralNetwork):
     """Adapted from https://github.com/anonymous-code-0/lie-transformer"""
 
-    def _get_y_true(self, y):
-        return y.cuda()
-
     def _process_inputs(self, x):
+        """This network takes a tuple."""
         return tuple([ten.cuda() for ten in x])
 
     def build_net(self, dim_input, dim_hidden, num_layers,

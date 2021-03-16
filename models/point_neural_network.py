@@ -20,11 +20,8 @@ from preprocessing.distance_calculator import DistanceCalculator, \
 from utils import get_eta, format_time, print_with_overwrite
 
 
-def sigmoid(x):
-    return 1 / (1 + np.exp(-x))
-
-
 class PointNeuralNetwork(nn.Module):
+    """Base class for node classification and regression tasks."""
 
     def __init__(self, save_path, learning_rate, weight_decay=None,
                  mode='classification', wandb_project=None, wandb_run=None,
@@ -66,23 +63,30 @@ class PointNeuralNetwork(nn.Module):
         self.apply(self.xavier_init)
         self.cuda()
 
+    @abstractmethod
+    def build_net(self, **model_kwargs):
+        raise NotImplementedError(
+            'Classes inheriting from the virtual class PointNeuralNetwork must '
+            'implement the build_net method.')
+
     def forward(self, x):
         for layer in self.layers:
             x = layer(x)
         return x
 
-    @abstractmethod
     def _get_y_true(self, y):
-        pass
+        """Preprocessing for getting the true node labels."""
+        return y.cuda()
 
     def _process_inputs(self, x):
+        """Preprocessing for getting the inputs."""
         return x.cuda()
 
     def _get_loss(self, y_true, y_pred):
-        loss = self.loss(y_pred, y_true)
-        return loss
+        """Process the loss."""
+        return self.loss(y_pred, y_true)
 
-    def optimise(self, data_loader, epochs=1, opt_cycle=-1):
+    def optimise(self, data_loader, epochs=1):
         """Train the network.
 
         Trains the neural network. Displays training information and plots the
@@ -91,7 +95,6 @@ class PointNeuralNetwork(nn.Module):
         Arguments:
             data_loader: pytorch DataLoader object for training
             epochs: number of complete training cycles
-            opt_cycle: (for active learning): active learning cycle
         """
         start_time = time.time()
         total_iters = epochs * len(data_loader)
@@ -200,93 +203,6 @@ class PointNeuralNetwork(nn.Module):
             # save after each epoch
             self.save()
 
-    def test(self, data_loader, predictions_file=None):
-        """Use trained network to perform inference on the test set.
-
-        Uses the neural network (in Session.network), to perform predictions
-        on the structures found in <test_data_root>, and saves this output
-        to <save_path>/predictions_<test_data_root.name>.txt.
-
-        Arguments:
-            data_loader:
-            predictions_file:
-        """
-        self.cuda()
-        start_time = time.time()
-        log_interval = 10
-        decoy_mean_pred, active_mean_pred = 0.5, 0.5
-        predictions = ''
-        if predictions_file is None:
-            predictions_file = self.predictions_file
-        predictions_file = Path(predictions_file).expanduser()
-        if predictions_file.is_file():
-            predictions_file.unlink()
-        self.eval()
-        with torch.no_grad():
-            for self.batch, (x, y_true, ligands, receptors) in enumerate(
-                    data_loader):
-
-                x = self._process_inputs(x)
-                y_true = self._get_y_true(y_true).cuda()
-                y_pred = self.forward_pass(x)
-                y_true_np = y_true.cpu().detach().numpy()
-                y_pred_np = nn.Softmax(dim=1)(y_pred).cpu().detach().numpy()
-
-                active_idx = (np.where(y_true_np > 0.5), 1)
-                decoy_idx = (np.where(y_true_np < 0.5), 1)
-
-                scale = len(y_true) / len(data_loader)
-                _ = self._get_loss(y_true, y_pred)
-
-                eta = get_eta(start_time, self.batch, len(data_loader))
-                time_elapsed = format_time(time.time() - start_time)
-
-                wandb_update_dict = {
-                    'Time remaining (validation)': eta,
-                    'Binary crossentropy (validation)': self.bce_loss,
-                    'Batch': self.batch + 1
-                }
-
-                if len(active_idx[0][0]):
-                    active_mean_pred = np.mean(y_pred_np[active_idx])
-                    wandb_update_dict.update({
-                        'Mean active prediction (validation)': active_mean_pred
-                    })
-                if len(decoy_idx[0][0]):
-                    decoy_mean_pred = np.mean(y_pred_np[decoy_idx])
-                    wandb_update_dict.update({
-                        'Mean decoy prediction (validation)': decoy_mean_pred,
-                    })
-
-                try:
-                    wandb.log(wandb_update_dict)
-                except wandb.errors.error.Error:
-                    pass  # wandb has not been initialised so ignore
-
-                print_with_overwrite(
-                    ('Inference on: {}'.format(data_loader.dataset.base_path),
-                     '|', 'Iteration:', '{0}/{1}'.format(
-                        self.batch + 1, len(data_loader))),
-                    ('Time elapsed:', time_elapsed, '|',
-                     'Time remaining:', eta),
-                    ('Loss: {0:.4f}'.format(self.bce_loss), '|',
-                     'Mean active: {0:.4f}'.format(active_mean_pred), '|',
-                     'Mean decoy: {0:.4f}'.format(decoy_mean_pred))
-                )
-
-                predictions += '\n'.join(['{0} | {1:.7f} {2} {3}'.format(
-                    int(y_true_np[i]),
-                    y_pred_np[i, 1],
-                    receptors[i],
-                    ligands[i]) for i in range(len(receptors))]) + '\n'
-
-                # Periodically write predictions to disk
-                if not (self.batch + 1) % log_interval or self.batch == len(
-                        data_loader) - 1:
-                    with open(predictions_file, 'a') as f:
-                        f.write(predictions)
-                        predictions = ''
-
     def save(self, save_path=None):
         """Save all network attributes, including internal states."""
 
@@ -319,11 +235,13 @@ class PointNeuralNetwork(nn.Module):
 
     @property
     def param_count(self):
+        """Return the number of parameters in the network."""
         return sum(
             [torch.numel(t) for t in self.parameters() if t.requires_grad])
 
     @staticmethod
     def xavier_init(m):
+        """Initialise network weights with xiavier initialisation."""
         if isinstance(m, (nn.Linear, nn.Conv2d)):
             nn.init.xavier_normal_(m.weight)
             if m.bias is not None:
@@ -335,8 +253,33 @@ class PointNeuralNetwork(nn.Module):
                 m.bias.data.fill_(0)
 
     def colour_pdb(self, rec_fname, lig_fname, output_fname, radius=12):
+        """Use model to set b-factor values for each atom to node label.
+
+        This method can be used to visualise the output of point-cloud based
+        atom labelling neural networks. The atom labels are stored in a PDB
+        file which has the same entries as the receptor input PDB file, with
+        the b-factor field filled in to the value given by each atom in the
+        network. This can then be visualised in pymol using the commands:
+
+            load <output_fname>
+            spectrum b, red_white_blue
+
+        Arguments:
+            rec_fname: pdb file containing the protein input
+            lig_fname: sdf or mol2 file containing the ligand input. This is
+                only used to find the bounding box
+            output_fname: where to store the output pdb file
+            radius: radius of the bounding box, centred on the ligand
+
+        Raises:
+            RuntimeError if the ligand cannot be extracted from the input.
+        """
+
+        # RDKit and Openbabel are extremely verbose
         RDLogger.DisableLog('*')
         pybel.ob.obErrorLog.SetOutputLevel(0)
+
+        # Extract bounding box location
         centre_coords = None
         if Path(lig_fname).suffix == '.sdf':
             for item in Chem.SDMolSupplier(str(Path(lig_fname).expanduser())):
@@ -349,14 +292,22 @@ class PointNeuralNetwork(nn.Module):
         if centre_coords is None:
             raise RuntimeError('Unable to extract ligand from {}'.format(
                 lig_fname))
+
         dc = DistanceCalculator()
 
+        # Extract openbabel and biopython protein objects. Openbabel must be
+        # used for accurate atom typing, but only biopython can be used to set
+        # b-factor information.
         rec_fname = Path(rec_fname).expanduser()
         output_fname = str(Path(output_fname).expanduser())
         receptor_bp = dc.read_file(rec_fname, False, read_type='biopython')
         receptor_ob = dc.read_file(rec_fname, False, read_type='openbabel')
 
+        # Set up bookkeeping so we can go between openbabel and biopython,
+        # because openbabel types and indices do not translate to biopython
+        # so we have to use coordinates as indices...
         pos_to_idx = defaultdict(lambda: defaultdict(lambda: dict()))
+
         xs, ys, zs = [], [], []
         types, pdb_types = [], []
         for idx, ob_atom in enumerate(receptor_ob):
@@ -376,9 +327,8 @@ class PointNeuralNetwork(nn.Module):
             ys.append(ainfo[1] - centre_coords[1])
             zs.append(ainfo[2] - centre_coords[2])
             types.append(ainfo[3])
-            pdb_types.append(
-                ob_atom.residue.OBResidue.GetAtomID(ob_atom.OBAtom).strip())
 
+        # Extract information about atoms in bounding box
         xs, ys, zs = np.array(xs), np.array(ys), np.array(zs)
         df = pd.DataFrame()
         df['x'] = xs
@@ -388,6 +338,9 @@ class PointNeuralNetwork(nn.Module):
         df['atom_idx'] = np.arange(len(df))
         df['sq_vec'] = df['x'] ** 2 + df['y'] ** 2 + df['z'] ** 2
         df = df[df.sq_vec < radius ** 2].copy()
+
+        # Openbabel and biopython do not use the same indexing so we have to be
+        # sneaky...
         included_indices = df['atom_idx'].to_numpy()
         coords = torch.from_numpy(
             np.vstack([df['x'], df['y'], df['z']]).T).float()
@@ -396,19 +349,25 @@ class PointNeuralNetwork(nn.Module):
             torch.from_numpy(df['types'].to_numpy()), num_classes=11).float()
         feats = repeat(feats, 'a b -> n a b', n=2)
         mask = torch.ones(2, feats.shape[1]).byte()
+
+        # Obtain the atom labels from the network
         labels = self(
             (coords.cuda(),
              feats.cuda(),
              mask.cuda())
         ).cpu().detach().numpy()[0, :].squeeze()
+
+        # Set probability of atoms in bounding box, all others set to zero
         all_labels = np.zeros((len(xs),))
         all_labels[included_indices] = labels
 
+        # Finally we can set the b-factors using biopython
         for atom in receptor_bp.get_atoms():
             x, y, z = atom.get_coord()
             ob_idx = pos_to_idx[str(x)][str(y)][str(z)]
             atom.set_bfactor(all_labels[ob_idx])
 
+        # Write modified PDB to disk
         io = PDB.PDBIO()
         io.set_structure(receptor_bp)
         io.save(output_fname)
