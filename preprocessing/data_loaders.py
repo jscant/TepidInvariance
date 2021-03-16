@@ -9,10 +9,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 import yaml
 from torch.utils.data import SubsetRandomSampler
-
-from preprocessing.preprocessing import make_bit_vector
 
 
 def random_rotation(x):
@@ -107,10 +106,11 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         struct['sq_dist'] = (struct['x'] ** 2 +
                              struct['y'] ** 2 +
                              struct['z'] ** 2)
+        struct['atom_idx'] = np.arange(len(struct))
 
         if self.inverse:
             struct['dist'] = np.maximum(
-                np.ones((len(struct),)), 1 / struct['dist'])
+                np.zeros((len(struct),)), 1 / struct['dist'])
 
         struct = struct[struct.sq_dist < self.radius ** 2].copy()
         return struct
@@ -137,7 +137,8 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
 
         p = torch.from_numpy(np.expand_dims(self.rot(
             struct[struct.columns[:3]].to_numpy()), 0))
-        v = torch.unsqueeze(make_bit_vector(struct.types.to_numpy(), 11), 0)
+        v = torch.unsqueeze(F.one_hot(
+            torch.as_tensor(struct.types.to_numpy()), 11), 0)
         m = torch.from_numpy(np.ones((1, len(struct))))
 
         if self.binary_threshold is None:
@@ -170,7 +171,7 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         max_len = max([b[-1] for b in batch])
         batch_size = len(batch)
         p_batch = torch.zeros(batch_size, max_len, 3)
-        v_batch = torch.zeros(batch_size, max_len, 12)
+        v_batch = torch.zeros(batch_size, max_len, 11)
         m_batch = torch.zeros(batch_size, max_len)
         label_batch = torch.zeros(batch_size, max_len)
         filenames = []
