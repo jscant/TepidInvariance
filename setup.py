@@ -12,7 +12,6 @@ setup(
         'numpy',
         'pandas',
         'wandb',
-        'yaml',
         'pyyaml',
         'einops',
         'rdkit',
