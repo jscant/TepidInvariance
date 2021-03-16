@@ -4,8 +4,8 @@ This is the beginnings of a project for infering protein hotspots from real
 data. To install (including dependencies):
 
 ```
-conda install -c conda-forge rdkit
-conda install -c openbabel openbabel
+conda install -c conda-forge rdkit -y
+conda install -c openbabel openbabel -y
 git clone https://github.com/jscant/TepidInvariance.git
 cd TepidInvariance
 pip install -r requirements.txt
