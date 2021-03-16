@@ -5,8 +5,6 @@ setup(
     version='0.0.1',
     description='SE(3)-equivariant neural networks for hotspot prediction.',
     author='Jack Scantlebury',
-    packages=[''],
-    package_dir={'': ''},
     install_requires=[
         'torch',
         'numpy',
@@ -14,9 +12,8 @@ setup(
         'wandb',
         'pyyaml',
         'einops',
-        'rdkit',
         'matplotlib',
-        'openbabel',
+        'pybel',
         'scipy'
     ],
 )
