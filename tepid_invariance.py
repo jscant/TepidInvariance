@@ -6,6 +6,7 @@ import wandb
 import yaml
 from lie_conv.lieGroups import SE3
 
+from models.lie_conv import LieResNet
 from models.lie_transformer import LieTransformer
 from parse_args import parse_args
 from preprocessing.data_loaders import LieTransformerLabelledAtomsDataset
@@ -14,7 +15,7 @@ if __name__ == '__main__':
     args = parse_args()
 
     model_kwargs = {
-        'dim_input': 12,
+        'dim_input': 11,
         'dim_hidden': args.channels,
         'num_layers': args.layers,
         'num_heads': 8,
@@ -46,10 +47,19 @@ if __name__ == '__main__':
     dl = torch.utils.data.DataLoader(
         ds, shuffle=True, batch_size=args.batch_size, collate_fn=ds.collate,
         drop_last=True)
+
     mode = 'regression' if args.binary_threshold is None else 'classification'
-    model = LieTransformer(
-        args.save_path, args.learning_rate, args.weight_decay, mode=mode,
-        **model_kwargs)
+    if args.model == 'lieconv':
+        model = LieResNet(
+            args.save_path, args.learning_rate, args.weight_decay, mode=mode,
+            **model_kwargs)
+    elif args.model == 'lietransformer':
+        model = LieTransformer(
+            args.save_path, args.learning_rate, args.weight_decay, mode=mode,
+            **model_kwargs)
+    else:
+        raise NotImplementedError(
+            'supplied model arg must be either lieconv or lietransformer')
     if args.wandb_project is not None:
         args_to_record = vars(args)
         args_to_record.update(model_kwargs)

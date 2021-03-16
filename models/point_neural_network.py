@@ -351,11 +351,10 @@ class PointNeuralNetwork(nn.Module):
         mask = torch.ones(2, feats.shape[1]).byte()
 
         # Obtain the atom labels from the network
-        labels = self(
-            (coords.cuda(),
-             feats.cuda(),
-             mask.cuda())
-        ).cpu().detach().numpy()[0, :].squeeze()
+        labels = torch.sigmoid(
+            self((coords.cuda(),
+                  feats.cuda(),
+                  mask.cuda()))).cpu().detach().numpy()[0, :].squeeze()
 
         # Set probability of atoms in bounding box, all others set to zero
         all_labels = np.zeros((len(xs),))

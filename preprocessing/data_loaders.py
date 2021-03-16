@@ -134,7 +134,6 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         filename = self.filenames[item]
 
         struct = self.centre_and_truncate(filename)
-
         p = torch.from_numpy(np.expand_dims(self.rot(
             struct[struct.columns[:3]].to_numpy()), 0))
         v = torch.unsqueeze(F.one_hot(
