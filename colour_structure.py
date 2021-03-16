@@ -5,6 +5,7 @@ import torch
 import yaml
 from lie_conv.lieGroups import SE3
 
+from models.lie_conv import LieResNet
 from models.lie_transformer import LieTransformer
 
 if __name__ == '__main__':
@@ -28,12 +29,15 @@ if __name__ == '__main__':
         mode = 'regression'
     else:
         mode = 'classification'
-    model = LieTransformer(Path(), 0, 0, mode=mode, **model_kwargs)
+    model = cmd_line_args['model']
+    model_class = {
+        'lietransformer': LieTransformer, 'lieconv': LieResNet}[model]
+    model_obj = model_class(Path(), 0, 0, **model_kwargs)
 
     checkpoint = torch.load(args.model.expanduser())
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.eval()
+    model_obj.load_state_dict(checkpoint['model_state_dict'])
+    model_obj.eval()
 
-    model.colour_pdb(
+    model_obj.colour_pdb(
         args.receptor.expanduser(), args.ligand.expanduser(),
         args.output_fname.expanduser(), radius=cmd_line_args['radius'])

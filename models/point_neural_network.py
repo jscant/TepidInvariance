@@ -348,7 +348,7 @@ class PointNeuralNetwork(nn.Module):
         feats = F.one_hot(
             torch.from_numpy(df['types'].to_numpy()), num_classes=11).float()
         feats = repeat(feats, 'a b -> n a b', n=2)
-        mask = torch.ones(2, feats.shape[1]).byte()
+        mask = torch.ones(2, feats.shape[1]).bool()
 
         # Obtain the atom labels from the network
         labels = torch.sigmoid(
