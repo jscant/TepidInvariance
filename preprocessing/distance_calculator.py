@@ -9,6 +9,7 @@ import openbabel
 import pandas as pd
 import pybel
 import yaml
+from Bio import PDB as PDB
 from Bio.SeqUtils import seq1
 from rdkit import Chem
 from rdkit import RDLogger
@@ -551,6 +552,35 @@ class DistanceCalculator:
             ),
         ]
         self.atom_types = [info.sm for info in self.atom_type_data]
+        self.type_map = self.get_type_map()
+
+    def get_type_map(self):
+        types = [
+            ['AliphaticCarbonXSHydrophobe'],
+            ['AliphaticCarbonXSNonHydrophobe'],
+            ['AromaticCarbonXSHydrophobe'],
+            ['AromaticCarbonXSNonHydrophobe'],
+            ['Nitrogen', 'NitrogenXSAcceptor'],
+            ['NitrogenXSDonor', 'NitrogenXSDonorAcceptor'],
+            ['Oxygen', 'OxygenXSAcceptor'],
+            ['OxygenXSDonor', 'OxygenXSDonorAcceptor'],
+            ['Sulfur', 'SulfurAcceptor'],
+            ['Phosphorus']
+        ]
+        out_dict = {}
+        generic = []
+        for i, element_name in enumerate(self.atom_types):
+            for types_list in types:
+                if element_name in types_list:
+                    out_dict[i] = types.index(types_list)
+                    break
+            if not i in out_dict.keys():
+                generic.append(i)
+
+        generic_type = len(types)
+        for other_type in generic:
+            out_dict[other_type] = generic_type
+        return out_dict
 
     @staticmethod
     def distance_to_closest_aromatic(
@@ -560,32 +590,29 @@ class DistanceCalculator:
         return np.amin(distances, axis=1)
 
     @staticmethod
-    def read_file(infile: str, add_hydrogens: bool):
+    def read_file(infile, add_hydrogens, read_type='openbabel'):
         """Use openbabel to read in a pdb file.
 
         Args:
             infile (str): Path to input file
             add_hydrogens (bool): Add hydrogens to the openbabel OBMol object
+            read_type: either biopython or openbabel
 
         Returns:
             pybel.Molecule
         """
+        if read_type == 'biopython':
+            parser = PDB.PDBParser()
+            return parser.get_structure('receptor', infile)
         molecules = []
 
-        file_read = pybel.readfile("pdb", infile)
+        file_read = pybel.readfile("pdb", str(infile))
 
         for mol in file_read:
             molecules.append(mol)
 
         if len(molecules) != 1:
-            print(
-                "Something went wrong with %s. There should be 1 molecule, "
-                "but there are %d" % (infile, len(molecules))
-            )
-            with open("more_than_one_mol.txt", "a") as log_mol:
-                log_mol.write(infile)
-                log_mol.write("\n")
-            return 1
+            raise RuntimeError('More than one molecule detected in PDB file.')
 
         mol = molecules[0]
 
@@ -705,15 +732,16 @@ class DistanceCalculator:
         res_numbers = []
         res_types = []
 
-        for atom in receptor:
+        for idx, atom in enumerate(receptor):
             smina_type = self.obatom_to_smina_type(atom)
             if smina_type == "NumTypes":
                 smina_type_int = len(self.atom_type_data)
             else:
                 smina_type_int = self.atom_types.index(smina_type)
+            type_int = self.type_map[smina_type_int]
 
             ainfo = [i for i in atom.coords]
-            ainfo.append(smina_type_int)
+            ainfo.append(type_int)
 
             xs.append(ainfo[0])
             ys.append(ainfo[1])
