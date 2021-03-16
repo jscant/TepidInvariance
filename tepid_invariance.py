@@ -13,6 +13,10 @@ from preprocessing.data_loaders import LieTransformerLabelledAtomsDataset
 
 if __name__ == '__main__':
     args = parse_args()
+    args.save_path.expanduser().mkdir(parents=True, exist_ok=True)
+    
+    with open(args.save_path.expanduser() / 'cmd_line_args.yaml', 'w') as f:
+        yaml.dump(vars(args), f)
 
     model_kwargs = {
         'dim_input': 11,
@@ -34,9 +38,6 @@ if __name__ == '__main__':
         'lie_algebra_nonlinearity': None,
         'dropout': args.dropout
     }
-
-    with open(args.save_path.expanduser() / 'cmd_line_args.yaml', 'w') as f:
-        yaml.dump(vars(args), f)
 
     torch.manual_seed(0)
     random.seed(0)
