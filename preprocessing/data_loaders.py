@@ -179,6 +179,9 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
             p_batch[batch_index, :p.shape[1], :] = p
             v_batch[batch_index, :v.shape[1], :] = v
             m_batch[batch_index, :m.shape[1]] = m
-            label_batch[batch_index, :dist.shape[0]] = dist
+            try:
+                label_batch[batch_index, :dist.shape[0]] = dist
+            except IndexError:  # no positive labels
+                pass
             filenames.append(filename)
         return (p_batch, v_batch, m_batch.bool()), label_batch, filenames
