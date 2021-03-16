@@ -3,6 +3,7 @@ import random
 import numpy as np
 import torch
 import wandb
+import yaml
 from lie_conv.lieGroups import SE3
 
 from lie_transformer.lie_transformer import LieTepid
@@ -13,16 +14,13 @@ if __name__ == '__main__':
     args = parse_args()
 
     model_kwargs = {
-        'dim_input': 12,
+        'dim_input': 11,
         'dim_hidden': args.channels,
         'num_layers': args.layers,
         'num_heads': 8,
-        'global_pool': True,
-        'global_pool_mean': True,
         'group': SE3(0.2),
         'liftsamples': args.liftsamples,
         'block_norm': "layer_pre",
-        'output_norm': "none",
         'kernel_norm': "none",
         'kernel_type': args.kernel_type,
         'kernel_dim': args.kernel_dim,
@@ -35,6 +33,9 @@ if __name__ == '__main__':
         'lie_algebra_nonlinearity': None,
         'dropout': args.dropout
     }
+
+    with open(args.save_path.expanduser() / 'cmd_line_args.yaml', 'w') as f:
+        yaml.dump(vars(args), f)
 
     torch.manual_seed(0)
     random.seed(0)

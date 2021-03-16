@@ -35,7 +35,7 @@ def make_bit_vector(atom_types, n_atom_types):
     indices = torch.from_numpy(atom_types % n_atom_types).long()
     one_hot = F.one_hot(indices, num_classes=n_atom_types)
     rows, cols = one_hot.shape
-    result = torch.zeros(rows, cols + 1)
+    result = torch.zeros(rows, cols)
     result[:, 1:] = one_hot
     type_bit = torch.from_numpy(
         (atom_types // n_atom_types).astype('bool').astype('int'))

@@ -65,7 +65,7 @@ def parse_args():
                         help='Input channels')
     parser.add_argument('--liftsamples', type=int, default=1,
                         help='liftsamples parameter in LieConv')
-    parser.add_argument('--radius', type=int, default=6,
+    parser.add_argument('--radius', type=int, default=12,
                         help='Maximum distance from a ligand atom for a '
                              'receptor atom to be included in input')
     parser.add_argument('--nbhd', type=int, default=32,
