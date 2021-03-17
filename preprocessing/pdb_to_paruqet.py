@@ -35,12 +35,27 @@ from rdkit.Chem import ChemicalFeatures
 from scipy.spatial.distance import cdist
 
 
-def get_aromatic_indices(rdkit_mol):
+# We don't require a FeatureFactory
+def get_aromatic_indices(rdkit_mol, _=None):
     """Get indices of all atoms in aromatic rings (rdkit)."""
     return [atom.GetIdx() for atom in rdkit_mol.GetAromaticAtoms()]
 
 
-def get_aromatic_atom_coords(rdkit_mol):
+def get_hba_indices(rdkit_mol, factory):
+    """Get indices of all hydrogen bond acceptors (redkit)."""
+    feats = factory.GetFeaturesForMol(rdkit_mol)
+    return set([feat.GetAtomIds()[0] for feat in feats
+                if feat.GetFamily() == 'Acceptor'])
+
+
+def get_hbd_indices(rdkit_mol, factory):
+    """Get indices of all hydrogen bond donors (redkit)."""
+    feats = factory.GetFeaturesForMol(rdkit_mol)
+    return set([feat.GetAtomIds()[0] for feat in feats
+                if feat.GetFamily() == 'Donor'])
+
+
+def get_aromatic_atom_coords(rdkit_mol, _=None):
     """Get coordinates of all atoms in aromatic rings (rdkit)."""
     aromatic_indices = get_aromatic_indices(rdkit_mol)
     return get_positions(rdkit_mol)[aromatic_indices, :]
@@ -48,26 +63,14 @@ def get_aromatic_atom_coords(rdkit_mol):
 
 def get_hba_atom_coords(rdkit_mol):
     """Get coordinates of all hydrogen bond acceptors (redkit)."""
-    fdefName = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
-    factory = ChemicalFeatures.BuildFeatureFactory(fdefName)
-    feats = factory.GetFeaturesForMol(rdkit_mol)
-    ids = set()
-    for feat in feats:
-        if feat.GetFamily() == 'Acceptor':
-            ids.add(feat.GetAtomIds())
+    ids = get_hba_indices(rdkit_mol)
     coords = get_positions(rdkit_mol)
     return coords[np.array(list(ids), dtype=np.int).squeeze(), :]
 
 
 def get_hbd_atom_coords(rdkit_mol):
     """Get coordinates of all hydrogen bond donors (redkit)."""
-    fdefName = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
-    factory = ChemicalFeatures.BuildFeatureFactory(fdefName)
-    feats = factory.GetFeaturesForMol(rdkit_mol)
-    ids = set()
-    for feat in feats:
-        if feat.GetFamily() == 'Donor':
-            ids.add(feat.GetAtomIds())
+    ids = get_hbd_indices(rdkit_mol)
     coords = get_positions(rdkit_mol)
     return coords[np.array(list(ids), dtype=np.int).squeeze(), :]
 
@@ -628,11 +631,11 @@ class DistanceCalculator:
 
     @staticmethod
     def min_distance_to_ligand_atom_of_interest(
-            rec_coords, lig, atom_filter=None):
+            rec_coords, lig, atom_filter=None, factory=None):
         if atom_filter is None:
             lig_coords = get_positions(lig)
         else:
-            lig_coords = atom_filter(lig)
+            lig_coords = atom_filter(lig, factory)
         distances = cdist(rec_coords, lig_coords, metric='euclidean')
         return np.amin(distances, axis=1)
 
@@ -789,6 +792,9 @@ class DistanceCalculator:
         }
         filter_fn = filters[atom_condition]
 
+        fdefName = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
+        factory = ChemicalFeatures.BuildFeatureFactory(fdefName)
+
         RDLogger.DisableLog('*')
         pybel.ob.obErrorLog.SetOutputLevel(0)
         output_path = Path(output_path).expanduser()
@@ -833,7 +839,7 @@ class DistanceCalculator:
         taken_names = set()
         rddkit_failure = 0
         total = 0
-        no_aromatics = 0
+        no_features = 0
         other_failure = 0
         ligand_centres = {}
 
@@ -845,7 +851,7 @@ class DistanceCalculator:
                 df['z'] = zs
                 df['types'] = types
                 df['dist'] = self.min_distance_to_ligand_atom_of_interest(
-                    rec_coords, ligand, filter_fn)
+                    rec_coords, ligand, filter_fn, factory)
                 mol_name = ligand.GetProp('_Name')
                 if mol_name is None:  # Do I trust RDKit to fail?
                     mol_name = 'MOL_{}'.format(idx)
@@ -866,7 +872,7 @@ class DistanceCalculator:
             except AttributeError:
                 rddkit_failure += 1
             except ValueError:
-                no_aromatics += 1
+                no_features += 1
             except:
                 other_failure += 1
             total += 1
@@ -875,18 +881,19 @@ class DistanceCalculator:
             yaml.dump(ligand_centres, f)
 
         print('Failed structures:', rddkit_failure, '/', total)
-        print('No aromatics:', no_aromatics, '/', total)
+        print('No {}:'.format(atom_condition), no_features, '/', total)
         print('Other errors:', other_failure, '/', total)
 
         output_stats_fname = output_path.parent / 'rdkit_stats.log'
         if not output_stats_fname.is_file():
             with open(output_stats_fname, 'w') as f:
                 f.write(
-                    'total_structures\trdkit_fail\tno_aromatics\tother_fail\n')
+                    'total_structures\trdkit_fail\tno_{}\tother_fail\n'.format(
+                        atom_condition))
 
         with open(output_stats_fname, 'a') as f:
             f.write('\t'.join(map(str, [total, rddkit_failure,
-                                        no_aromatics, other_failure])) + '\n')
+                                        no_features, other_failure])) + '\n')
 
     def process_all_in_directory(self, base_path, output_path, filter):
         base_path = Path(base_path)
