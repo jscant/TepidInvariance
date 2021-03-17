@@ -1,7 +1,25 @@
-"""Python reimplementation of the gninatyper functionality, (with distances)
-    as per https://pubs.acs.org/doi/10.1021/acs.jcim.6b00740
+"""
+Convert pdb, sdf and mol2 coordinates files into pandas-readable parquet files,
+which can be used by point cloud/GNN models in this repo. Usage:
+
+pdb_to_parquet.py <base_path> <output_path>
+
+<base_path> should be structured like so:
+
+<base_path>
+├── ligands
+│   ├── receptor_a
+│   │   └── ligands.sdf
+│   └── receptor_b
+│       └── ligands.sdf
+└── receptors
+    ├── receptor_a
+    │   └── receptor.pdb
+    └── receptor_a
+        └── receptor.pdb
 """
 import argparse
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -16,30 +34,32 @@ from rdkit import RDLogger
 from scipy.spatial.distance import cdist
 
 
-def get_aromatic_atom_coords(rdkit_mol):
-    aromatics_indices = set()
-    rings = rdkit_mol.GetRingInfo().AtomRings()
-    for ring in rings:
-        for atom in ring:
-            if rdkit_mol.GetAtomWithIdx(atom).GetIsAromatic():
-                aromatics_indices.add(atom)
-    aromatics_indices = np.array(list(aromatics_indices), dtype=np.int32)
+def get_aromatic_indices(rdkit_mol):
+    """Get indices of all atoms in aromatic rings (rdkit)."""
+    return [atom.GetIdx() for atom in rdkit_mol.GetAromaticAtoms()]
 
-    return get_positions(rdkit_mol)[aromatics_indices]
+
+def get_aromatic_atom_coords(rdkit_mol):
+    """Get coordinates of all atoms in aromatic rings (rdkit)."""
+    aromatic_indices = get_aromatic_indices(rdkit_mol)
+    return get_positions(rdkit_mol)[aromatic_indices, :]
 
 
 # conf.GetPositions often segfaults (RDKit bug)
 def get_positions(rdkit_mol):
+    """Get n x 3 numpy array containing positions of all atoms (rdkit)."""
     conf = rdkit_mol.GetConformer(0)
     return np.array(
         [conf.GetAtomPosition(i) for i in range(rdkit_mol.GetNumAtoms())])
 
 
 def get_centre_coordinates(rdkit_mol):
+    """Get mean atom position (rdkit)."""
     return np.mean(get_positions(rdkit_mol), axis=0)
 
 
 def identity_filter(mol):
+    """No filtering of atoms (rdkit)."""
     return get_positions(mol)
 
 
@@ -556,6 +576,7 @@ class DistanceCalculator:
         self.type_map = self.get_type_map()
 
     def get_type_map(self):
+        """Original author: Constantin Schneider"""
         types = [
             ['AliphaticCarbonXSHydrophobe'],
             ['AliphaticCarbonXSNonHydrophobe'],
@@ -594,6 +615,8 @@ class DistanceCalculator:
     def read_file(infile, add_hydrogens, read_type='openbabel'):
         """Use openbabel to read in a pdb file.
 
+        Original author: Constantin Schneider
+
         Args:
             infile (str): Path to input file
             add_hydrogens (bool): Add hydrogens to the openbabel OBMol object
@@ -623,6 +646,7 @@ class DistanceCalculator:
 
     @staticmethod
     def adjust_smina_type(t, h_bonded, hetero_bonded):
+        """Original author: Constantin schneider"""
         if t in ('AliphaticCarbonXSNonHydrophobe',
                  'AliphaticCarbonXSHydrophobe'):  # C_C_C_P,
             if hetero_bonded:
@@ -662,18 +686,25 @@ class DistanceCalculator:
             return t
 
     def obatom_to_smina_type(self, ob_atom):
-        num = ob_atom.atomicnum
-        ename = self.etab.GetSymbol(num)
-        if num == 1:
-            ename = "HD"
-        elif num == 6 and ob_atom.OBAtom.IsAromatic():
-            ename = "A"
-        elif num == 8:
-            ename = "OA"
-        elif num == 7 and ob_atom.OBAtom.IsHbondAcceptor():
-            ename = "NA"
-        elif num == 16 and ob_atom.OBAtom.IsHbondAcceptor():
-            ename = "SA"
+        """Original author: Constantin schneider"""
+        atomic_number = ob_atom.atomicnum
+        num_to_name = {1: 'HD', 6: 'A', 7: 'NA', 8: 'OA', 16: 'SA'}
+
+        # Default fn returns True, otherwise inspect atom properties
+        condition_fns = defaultdict(lambda: lambda: True)
+        condition_fns.update({
+            6: ob_atom.OBAtom.IsAromatic,
+            7: ob_atom.OBAtom.IsHbondAcceptor,
+            16: ob_atom.OBAtom.IsHbondAcceptor
+        })
+
+        # Get symbol
+        ename = self.etab.GetSymbol(atomic_number)
+
+        # Do we need to adjust symbol?
+        if condition_fns[atomic_number]():
+            ename = num_to_name.get(atomic_number, ename)
+
         atype = self.string_to_smina_type(ename)
 
         h_bonded = False
@@ -687,7 +718,10 @@ class DistanceCalculator:
         return self.adjust_smina_type(atype, h_bonded, hetero_bonded)
 
     def string_to_smina_type(self, string: str):
-        """Convert string type to smina type
+        """Convert string type to smina type.
+
+        Original author: Constantin schneider
+
         Args:
             string (str): string type
         Returns:
