@@ -33,7 +33,7 @@ def one_hot(numerical_category, num_classes):
 class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
     """Class for feeding structure parquets into network."""
 
-    def __init__(self, base_path, rot=False, binary_threshold=None,
+    def __init__(self, base_path, rot=True, binary_threshold=None,
                  max_suffix=np.inf, radius=12, inverse=False, **kwargs):
         """Initialise dataset.
         Arguments:
