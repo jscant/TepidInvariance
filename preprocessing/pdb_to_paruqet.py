@@ -807,7 +807,6 @@ class DistanceCalculator:
         other_failure = 0
         ligand_centres = {}
         for idx, ligand in enumerate(ligands):
-            get_hba_atom_coords(ligand)
             try:
                 df = pd.DataFrame()
                 df['x'] = xs
