@@ -10,7 +10,9 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('model', type=str,
                         help='Type of point cloud network to use '
-                             '(LieTransformer only for now)')
+                             '(lietransformer or lieconv)')
+    parser.add_argument('filter', type=str,
+                        help='One of aromatic, hba, hbd or any.')
     parser.add_argument('train_data_root', type=PosixPath,
                         help='Location of structure training *.parquets files. '
                              'Receptors should be in a directory named '

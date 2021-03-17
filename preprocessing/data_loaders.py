@@ -34,7 +34,7 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
     """Class for feeding structure parquets into network."""
 
     def __init__(self, base_path, rot=True, binary_threshold=None,
-                 max_suffix=np.inf, radius=12, inverse=False, filter='any',
+                 max_suffix=np.inf, radius=12, inverse=False, atom_filter='any',
                  **kwargs):
         """Initialise dataset.
         Arguments:
@@ -52,7 +52,7 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         """
 
         super().__init__(**kwargs)
-        self.filter = filter
+        self.filter = atom_filter
         self.binary_threshold = binary_threshold
         self.rot = random_rotation if rot else lambda x: x
         self.radius = radius

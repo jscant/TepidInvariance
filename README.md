@@ -70,6 +70,7 @@ The script options are as follows:
 positional arguments:
   model                 Type of point cloud network to use (lietransformer or
                         lieconv)
+  filter                One of aromatic, hba, hbd or any.
   train_data_root       Location of structure training *.parquets files.
                         Receptors should be in a directory named receptors,
                         with ligands located in their specific receptor

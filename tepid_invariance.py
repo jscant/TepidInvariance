@@ -44,7 +44,8 @@ if __name__ == '__main__':
     np.random.seed(0)
     ds = LieTransformerLabelledAtomsDataset(
         args.train_data_root, binary_threshold=args.binary_threshold,
-        radius=args.radius, max_suffix=args.max_suffix, inverse=args.inverse)
+        radius=args.radius, max_suffix=args.max_suffix, inverse=args.inverse,
+        atom_filter=args.filter)
     dl = torch.utils.data.DataLoader(
         ds, shuffle=True, batch_size=args.batch_size, collate_fn=ds.collate,
         drop_last=True)
