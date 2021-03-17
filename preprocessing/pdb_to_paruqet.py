@@ -19,6 +19,7 @@ pdb_to_parquet.py <base_path> <output_path>
         └── receptor.pdb
 """
 import argparse
+import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -29,8 +30,8 @@ import pybel
 import yaml
 from Bio import PDB as PDB
 from Bio.SeqUtils import seq1
-from rdkit import Chem
-from rdkit import RDLogger
+from rdkit import Chem, RDLogger, RDConfig
+from rdkit.Chem import ChemicalFeatures
 from scipy.spatial.distance import cdist
 
 
@@ -44,10 +45,31 @@ def get_aromatic_atom_coords(rdkit_mol):
     aromatic_indices = get_aromatic_indices(rdkit_mol)
     return get_positions(rdkit_mol)[aromatic_indices, :]
 
+
 def get_hba_atom_coords(rdkit_mol):
     """Get coordinates of all hydrogen bond acceptors (redkit)."""
-    from rdkit.Chem import rdMolChemicalFeatures as r
-    r.MolChemicalFeatureFactory()
+    fdefName = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
+    factory = ChemicalFeatures.BuildFeatureFactory(fdefName)
+    feats = factory.GetFeaturesForMol(rdkit_mol)
+    ids = set()
+    for feat in feats:
+        if feat.GetFamily() == 'Acceptor':
+            ids.add(feat.GetAtomIds())
+    coords = get_positions(rdkit_mol)
+    return coords[np.array(list(ids), dtype=np.int).squeeze(), :]
+
+
+def get_hbd_atom_coords(rdkit_mol):
+    """Get coordinates of all hydrogen bond donors (redkit)."""
+    fdefName = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
+    factory = ChemicalFeatures.BuildFeatureFactory(fdefName)
+    feats = factory.GetFeaturesForMol(rdkit_mol)
+    ids = set()
+    for feat in feats:
+        if feat.GetFamily() == 'Donor':
+            ids.add(feat.GetAtomIds())
+    coords = get_positions(rdkit_mol)
+    return coords[np.array(list(ids), dtype=np.int).squeeze(), :]
 
 
 # conf.GetPositions often segfaults (RDKit bug)
@@ -61,11 +83,6 @@ def get_positions(rdkit_mol):
 def get_centre_coordinates(rdkit_mol):
     """Get mean atom position (rdkit)."""
     return np.mean(get_positions(rdkit_mol), axis=0)
-
-
-def identity_filter(mol):
-    """No filtering of atoms (rdkit)."""
-    return get_positions(mol)
 
 
 class Info:
@@ -610,9 +627,12 @@ class DistanceCalculator:
         return out_dict
 
     @staticmethod
-    def distance_to_closest_aromatic(
-            rec_coords, lig, atom_filter=identity_filter):
-        lig_coords = atom_filter(lig)
+    def min_distance_to_ligand_atom_of_interest(
+            rec_coords, lig, atom_filter=None):
+        if atom_filter is None:
+            lig_coords = get_positions(lig)
+        else:
+            lig_coords = atom_filter(lig)
         distances = cdist(rec_coords, lig_coords, metric='euclidean')
         return np.amin(distances, axis=1)
 
@@ -758,7 +778,17 @@ class DistanceCalculator:
             return "NumTypes"
 
     def calculate_distances_and_write_parqets(
-            self, rec_fname, lig_fname, output_path):
+            self, rec_fname, lig_fname, output_path, atom_condition):
+
+        filters = {
+            'aromatics': get_aromatic_atom_coords,
+            'aromatic': get_aromatic_atom_coords,
+            'hba': get_hba_atom_coords,
+            'hbd': get_hbd_atom_coords,
+            'none': None
+        }
+        filter_fn = filters[atom_condition]
+
         RDLogger.DisableLog('*')
         pybel.ob.obErrorLog.SetOutputLevel(0)
         output_path = Path(output_path).expanduser()
@@ -806,6 +836,7 @@ class DistanceCalculator:
         no_aromatics = 0
         other_failure = 0
         ligand_centres = {}
+
         for idx, ligand in enumerate(ligands):
             try:
                 df = pd.DataFrame()
@@ -813,8 +844,8 @@ class DistanceCalculator:
                 df['y'] = ys
                 df['z'] = zs
                 df['types'] = types
-                df['dist'] = self.distance_to_closest_aromatic(
-                    rec_coords, ligand, get_aromatic_atom_coords)
+                df['dist'] = self.min_distance_to_ligand_atom_of_interest(
+                    rec_coords, ligand, filter_fn)
                 mol_name = ligand.GetProp('_Name')
                 if mol_name is None:  # Do I trust RDKit to fail?
                     mol_name = 'MOL_{}'.format(idx)
@@ -857,24 +888,27 @@ class DistanceCalculator:
             f.write('\t'.join(map(str, [total, rddkit_failure,
                                         no_aromatics, other_failure])) + '\n')
 
-    def process_all_in_directory(self, base_path, output_path):
+    def process_all_in_directory(self, base_path, output_path, filter):
         base_path = Path(base_path)
         ligs = base_path.glob('ligands/*/*.sdf')
         for lig in ligs:
             rec_name = lig.parent.name
             rec = lig.parents[2] / 'receptors' / rec_name / 'receptor.pdb'
             self.calculate_distances_and_write_parqets(
-                str(rec), str(lig), Path(output_path, rec_name))
+                str(rec), str(lig), Path(output_path, rec_name), filter)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('receptor', type=str,
                         help='PDB file containing receptor atom coordinates')
-    parser.add_argument('output_path', type=str, nargs='?',
+    parser.add_argument('output_path', type=str,
                         help='Directory in which to save output')
-    parser.add_argument('mode', type=str,
-                        help='One of aromatics, hba, hbd')
+    parser.add_argument('filter', type=str,
+                        help='One of aromatics, hba, hbd or none; the label '
+                             'assigned to each receptor atom is taken to be '
+                             'the distance to the closest ligand atom which '
+                             'fits the atom type supplied here.')
     parser.add_argument('--ligand', '-l', type=str,
                         help='SDF file containing ligand coordinates (possibly '
                              'multiple molecules)')
@@ -883,6 +917,7 @@ if __name__ == '__main__':
     dt = DistanceCalculator()
     if args.ligand is not None:
         dt.calculate_distances_and_write_parqets(
-            args.receptor, args.ligand, args.output_path)
+            args.receptor, args.ligand, args.output_path, args.filter)
     else:
-        dt.process_all_in_directory(args.receptor, args.output_path)
+        dt.process_all_in_directory(
+            args.receptor, args.output_path, args.filter)
