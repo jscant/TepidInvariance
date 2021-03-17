@@ -93,6 +93,7 @@ def sdf_to_labelled_pdb(sdf_filename, output_path):
     """
     output_path = Path(output_path).expanduser()
     output_path.mkdir(parents=True, exist_ok=True)
+    sdf_filename = Path(sdf_filename).expanduser()
     ligands = Chem.SDMolSupplier(str(Path(sdf_filename).expanduser()))
     pdb_parser = PDBStringParser()
     for ligand in ligands:

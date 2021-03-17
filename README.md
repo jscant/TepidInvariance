@@ -42,7 +42,7 @@ files must all be in the same sdf or mol2 file under
 ## Preparation of input data
 
 The inputs to the model are in the more memory-efficient pandas parquet format.
-The script `preprocessing/distance_calculator.py` handles converting pdb, sdf
+The script `preprocessing/pdb_to_parquet.py` handles converting pdb, sdf
 and mol2 files into parquet files, as well as converting the atom type to
 a smina-style `types` number (1-12), depending on the atomic number and
 chemical environment. The distance of the receptor atoms to the nearest ligand
@@ -51,7 +51,7 @@ of this process is a file containing the cartesian coordinates, the sminatype,
 and distance to nearest aromatic ligand atom of every receptor atom. This is 
 calculated for each ligand in each `ligands.sdf` file, by running:
 
-```python3 preprocessing/distance_calculator.py python3 preprocessing/distance_calculator.py <dataset_base_path> <dataset_output_base_path>```
+```python3 preprocessing/distance_calculator.py <dataset_base_path> <dataset_output_base_path>```
 
 ## Training the model
 
