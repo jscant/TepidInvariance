@@ -15,7 +15,7 @@ from einops import repeat
 from rdkit import Chem, RDLogger
 from torch import nn
 
-from preprocessing.distance_calculator import DistanceCalculator, \
+from preprocessing.pdb_to_paruqet import DistanceCalculator, \
     get_centre_coordinates
 from utils import get_eta, format_time, print_with_overwrite
 

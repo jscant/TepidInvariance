@@ -82,6 +82,7 @@ class Info:
 class DistanceCalculator:
     """Python reimplementation of the gninatyper function,
     as per https://pubs.acs.org/doi/10.1021/acs.jcim.6b00740
+    (some code modified from Constantin Schneider, OPIG)
     """
 
     def __init__(self):
@@ -574,7 +575,7 @@ class DistanceCalculator:
                 if element_name in types_list:
                     out_dict[i] = types.index(types_list)
                     break
-            if not i in out_dict.keys():
+            if i not in out_dict.keys():
                 generic.append(i)
 
         generic_type = len(types)
