@@ -1,7 +1,7 @@
 import argparse
 import warnings
 from collections import defaultdict
-from pathlib import Path, PosixPath
+from pathlib import Path
 
 import pybel
 from Bio import PDB as PDB
@@ -78,24 +78,40 @@ def label_aromatic(rdkit_mol, output_fname, pdb_parser=PDBStringParser()):
     io.save(str(Path(output_fname).expanduser()))
 
 
+def sdf_to_labelled_pdb(sdf_filename, output_path):
+    """Label aromaticity and convert to pdb all molecules in an sdf file.
+
+    Aromatic atoms are given a b-factor of 1, with the rest 0. This can be
+    vislialised in pymol, using the following command:
+
+        color pink, b > 0.5
+
+    Arguments:
+        sdf_filename: sdf file comtaining one or more molecules
+        output_path: directory in which pdb files are dumped (one per molecule
+            in sdf_filename)
+    """
+    output_path = Path(output_path).expanduser()
+    output_path.mkdir(parents=True, exist_ok=True)
+    ligands = Chem.SDMolSupplier(str(Path(sdf_filename).expanduser()))
+    pdb_parser = PDBStringParser()
+    for ligand in ligands:
+        if ligand is None:
+            continue
+        output_fname = Path(output_path, ligand.GetProp('_Name') + '.pdb')
+        label_aromatic(ligand, output_fname, pdb_parser=pdb_parser)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('ligands', type=PosixPath,
+    parser.add_argument('ligands', type=str,
                         help='SDF file containing ligand coordinates (possibly '
                              'multiple molecules)')
-    parser.add_argument('output_path', type=PosixPath, nargs='?',
+    parser.add_argument('output_path', type=str,
                         help='Directory in which to save output')
     args = parser.parse_args()
 
     RDLogger.DisableLog('*')
     pybel.ob.obErrorLog.SetOutputLevel(0)
-    output_path = args.output_path.expanduser()
-    output_path.mkdir(parents=True, exist_ok=True)
 
-    ligands = Chem.SDMolSupplier(str(args.ligands.expanduser()))
-    pdb_parser = PDBStringParser()
-    for ligand in ligands:
-        if ligand is None:
-            continue
-        output_fname = output_path / (ligand.GetProp('_Name') + '.pdb')
-        label_aromatic(ligand, output_fname, pdb_parser=pdb_parser)
+    sdf_to_labelled_pdb(args.ligands, args.output_path)
