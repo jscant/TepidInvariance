@@ -51,7 +51,7 @@ of this process is a file containing the cartesian coordinates, the sminatype,
 and distance to nearest aromatic ligand atom of every receptor atom. This is 
 calculated for each ligand in each `ligands.sdf` file, by running:
 
-```python3 preprocessing/distance_calculator.py <dataset_base_path> <dataset_output_base_path>```
+```python3 preprocessing/pdb_to_parquet.py <dataset_base_path> <dataset_output_base_path>```
 
 ## Training the model
 

@@ -44,6 +44,11 @@ def get_aromatic_atom_coords(rdkit_mol):
     aromatic_indices = get_aromatic_indices(rdkit_mol)
     return get_positions(rdkit_mol)[aromatic_indices, :]
 
+def get_hba_atom_coords(rdkit_mol):
+    """Get coordinates of all hydrogen bond acceptors (redkit)."""
+    from rdkit.Chem import rdMolChemicalFeatures as r
+    r.MolChemicalFeatureFactory()
+
 
 # conf.GetPositions often segfaults (RDKit bug)
 def get_positions(rdkit_mol):
@@ -802,6 +807,7 @@ class DistanceCalculator:
         other_failure = 0
         ligand_centres = {}
         for idx, ligand in enumerate(ligands):
+            get_hba_atom_coords(ligand)
             try:
                 df = pd.DataFrame()
                 df['x'] = xs
@@ -868,6 +874,8 @@ if __name__ == '__main__':
                         help='PDB file containing receptor atom coordinates')
     parser.add_argument('output_path', type=str, nargs='?',
                         help='Directory in which to save output')
+    parser.add_argument('mode', type=str,
+                        help='One of aromatics, hba, hbd')
     parser.add_argument('--ligand', '-l', type=str,
                         help='SDF file containing ligand coordinates (possibly '
                              'multiple molecules)')
