@@ -46,13 +46,12 @@ The script `preprocessing/pdb_to_parquet.py` handles converting pdb, sdf
 and mol2 files into parquet files, as well as converting the atom type to
 a smina-style `types` number (1-12), depending on the atomic number and
 chemical environment. The distance of the receptor atoms to the nearest ligand
-atom of interset (specified by the <filter> argument, either `none`
-(for any atom), `acceptor`, `donor` or `aromatic`.) is also stored. The result
+`acceptor`, `donor` and `aromatic` atoms are stored. The result
 of this process is a file containing the cartesian coordinates, the sminatype,
-and distance to nearest aromatic ligand atom of every receptor atom. This is 
+and distance to each type of ligand ligand atom of every receptor atom. This is 
 calculated for each ligand in each `ligands.sdf` file, by running:
 
-```python3 preprocessing/pdb_to_parquet.py <dataset_base_path> <dataset_output_base_path> <filter>```
+```python3 preprocessing/pdb_to_parquet.py <dataset_base_path> <dataset_output_base_path>```
 
 ## Training the model
 

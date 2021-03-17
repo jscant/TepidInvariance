@@ -19,7 +19,9 @@ pdb_to_parquet.py <base_path> <output_path>
         └── receptor.pdb
 """
 import argparse
+import multiprocessing as mp
 import os
+from builtins import enumerate
 from collections import defaultdict
 from pathlib import Path
 
@@ -61,16 +63,16 @@ def get_aromatic_atom_coords(rdkit_mol, _=None):
     return get_positions(rdkit_mol)[aromatic_indices, :]
 
 
-def get_hba_atom_coords(rdkit_mol):
+def get_hba_atom_coords(rdkit_mol, factory):
     """Get coordinates of all hydrogen bond acceptors (redkit)."""
-    ids = get_hba_indices(rdkit_mol)
+    ids = get_hba_indices(rdkit_mol, factory)
     coords = get_positions(rdkit_mol)
     return coords[np.array(list(ids), dtype=np.int).squeeze(), :]
 
 
-def get_hbd_atom_coords(rdkit_mol):
+def get_hbd_atom_coords(rdkit_mol, factory):
     """Get coordinates of all hydrogen bond donors (redkit)."""
-    ids = get_hbd_indices(rdkit_mol)
+    ids = get_hbd_indices(rdkit_mol, factory)
     coords = get_positions(rdkit_mol)
     return coords[np.array(list(ids), dtype=np.int).squeeze(), :]
 
@@ -636,6 +638,8 @@ class DistanceCalculator:
             lig_coords = get_positions(lig)
         else:
             lig_coords = atom_filter(lig, factory)
+        if not len(lig_coords):
+            return -1
         distances = cdist(rec_coords, lig_coords, metric='euclidean')
         return np.amin(distances, axis=1)
 
@@ -781,7 +785,7 @@ class DistanceCalculator:
             return "NumTypes"
 
     def calculate_distances_and_write_parqets(
-            self, rec_fname, lig_fname, output_path, atom_condition):
+            self, rec_fname, lig_fname, output_path):
 
         filters = {
             'aromatics': get_aromatic_atom_coords,
@@ -790,7 +794,6 @@ class DistanceCalculator:
             'hbd': get_hbd_atom_coords,
             'none': None
         }
-        filter_fn = filters[atom_condition]
 
         fdefName = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
         factory = ChemicalFeatures.BuildFeatureFactory(fdefName)
@@ -798,8 +801,9 @@ class DistanceCalculator:
         RDLogger.DisableLog('*')
         pybel.ob.obErrorLog.SetOutputLevel(0)
         output_path = Path(output_path).expanduser()
+        output_path.mkdir(parents=True, exist_ok=True)
 
-        ligands = Chem.SDMolSupplier(lig_fname)
+        ligands = Chem.SDMolSupplier(str(lig_fname))
         receptor = self.read_file(rec_fname, False)
 
         xs, ys, zs = [], [], []
@@ -837,12 +841,8 @@ class DistanceCalculator:
 
         rec_coords = df.to_numpy()
         taken_names = set()
-        rddkit_failure = 0
-        total = 0
-        no_features = 0
-        other_failure = 0
         ligand_centres = {}
-
+        filter_types = ['aromatic', 'hba', 'hbd']
         for idx, ligand in enumerate(ligands):
             try:
                 df = pd.DataFrame()
@@ -850,8 +850,12 @@ class DistanceCalculator:
                 df['y'] = ys
                 df['z'] = zs
                 df['types'] = types
-                df['dist'] = self.min_distance_to_ligand_atom_of_interest(
-                    rec_coords, ligand, filter_fn, factory)
+
+                for filter_type in filter_types:
+                    min_dist = self.min_distance_to_ligand_atom_of_interest(
+                        rec_coords, ligand, filters[filter_type], factory)
+                    df[filter_type] = min_dist
+                df['any'] = df[filter_types].min(axis=1)
                 mol_name = ligand.GetProp('_Name')
                 if mol_name is None:  # Do I trust RDKit to fail?
                     mol_name = 'MOL_{}'.format(idx)
@@ -863,46 +867,49 @@ class DistanceCalculator:
                 mol_name = mol_name + suffix_template.format(mol_index)
                 taken_names.add(mol_name)
                 out_name = mol_name + '.parquet'
-                output_path.mkdir(parents=True, exist_ok=True)
+
                 df.to_parquet(output_path / out_name)
 
                 # Yaml doesn't like np.float64 types or arrays
                 ligand_centres[out_name] = [float(i) for i in
                                             get_centre_coordinates(ligand)]
             except AttributeError:
-                rddkit_failure += 1
+                pass
             except ValueError:
-                no_features += 1
-            except:
-                other_failure += 1
-            total += 1
+                pass
 
         with open(output_path / 'ligand_centres.yaml', 'w') as f:
             yaml.dump(ligand_centres, f)
 
-        print('Failed structures:', rddkit_failure, '/', total)
-        print('No {}:'.format(atom_condition), no_features, '/', total)
-        print('Other errors:', other_failure, '/', total)
+    def _multiprocess_calc(self, recs, sdfs, output_paths):
+        """Wrapper for calculate_distances_and_write_parqets, for use with mp"""
+        print(len(recs))
+        for (rec, sdf, output_path) in zip(recs, sdfs, output_paths):
+            self.calculate_distances_and_write_parqets(
+                rec, sdf, output_path)
 
-        output_stats_fname = output_path.parent / 'rdkit_stats.log'
-        if not output_stats_fname.is_file():
-            with open(output_stats_fname, 'w') as f:
-                f.write(
-                    'total_structures\trdkit_fail\tno_{}\tother_fail\n'.format(
-                        atom_condition))
-
-        with open(output_stats_fname, 'a') as f:
-            f.write('\t'.join(map(str, [total, rddkit_failure,
-                                        no_features, other_failure])) + '\n')
-
-    def process_all_in_directory(self, base_path, output_path, filter):
+    def process_all_in_directory(self, base_path, output_path):
+        """Use multiprocessing to process all receptors in base_path."""
         base_path = Path(base_path)
         ligs = base_path.glob('ligands/*/*.sdf')
-        for lig in ligs:
+        jobs = []
+        cpus = mp.cpu_count()
+        sdfs = [[] for _ in range(cpus)]
+        recs = [[] for _ in range(cpus)]
+        output_paths = [[] for _ in range(cpus)]
+        for idx, lig in enumerate(ligs):
             rec_name = lig.parent.name
-            rec = lig.parents[2] / 'receptors' / rec_name / 'receptor.pdb'
-            self.calculate_distances_and_write_parqets(
-                str(rec), str(lig), Path(output_path, rec_name), filter)
+            sdfs[idx % cpus].append(lig)
+            recs[idx % cpus].append(
+                lig.parents[2] / 'receptors' / rec_name / 'receptor.pdb')
+            output_paths[idx % cpus].append(Path(output_path, rec_name))
+        for i in range(cpus):
+            p = mp.Process(
+                target=self._multiprocess_calc,
+                args=(recs[i], sdfs[i], output_paths[i]))
+            jobs.append(p)
+            p.start()
+            print('Started worker', i)
 
 
 if __name__ == '__main__':
@@ -911,11 +918,6 @@ if __name__ == '__main__':
                         help='PDB file containing receptor atom coordinates')
     parser.add_argument('output_path', type=str,
                         help='Directory in which to save output')
-    parser.add_argument('filter', type=str,
-                        help='One of aromatics, hba, hbd or none; the label '
-                             'assigned to each receptor atom is taken to be '
-                             'the distance to the closest ligand atom which '
-                             'fits the atom type supplied here.')
     parser.add_argument('--ligand', '-l', type=str,
                         help='SDF file containing ligand coordinates (possibly '
                              'multiple molecules)')
@@ -924,7 +926,6 @@ if __name__ == '__main__':
     dt = DistanceCalculator()
     if args.ligand is not None:
         dt.calculate_distances_and_write_parqets(
-            args.receptor, args.ligand, args.output_path, args.filter)
+            args.receptor, args.ligand, args.output_path)
     else:
-        dt.process_all_in_directory(
-            args.receptor, args.output_path, args.filter)
+        dt.process_all_in_directory(args.receptor, args.output_path)
