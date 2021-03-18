@@ -85,6 +85,14 @@ def get_positions(rdkit_mol):
         [conf.GetAtomPosition(i) for i in range(rdkit_mol.GetNumAtoms())])
 
 
+# overloaded for convenience in other uses
+def get_positions(rdkit_mol, _=None):
+    """Get n x 3 numpy array containing positions of all atoms (rdkit)."""
+    conf = rdkit_mol.GetConformer(0)
+    return np.array(
+        [conf.GetAtomPosition(i) for i in range(rdkit_mol.GetNumAtoms())])
+
+
 def get_centre_coordinates(rdkit_mol):
     """Get mean atom position (rdkit)."""
     return np.mean(get_positions(rdkit_mol), axis=0)
@@ -662,7 +670,8 @@ class DistanceCalculator:
             return parser.get_structure('receptor', infile)
         molecules = []
 
-        file_read = pybel.readfile("pdb", str(infile))
+        suffix = Path(infile).suffix[1:]
+        file_read = pybel.readfile(suffix, str(infile))
 
         for mol in file_read:
             molecules.append(mol)
@@ -792,7 +801,7 @@ class DistanceCalculator:
             'aromatic': get_aromatic_atom_coords,
             'hba': get_hba_atom_coords,
             'hbd': get_hbd_atom_coords,
-            'none': None
+            'any': get_positions
         }
 
         fdefName = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
@@ -842,7 +851,7 @@ class DistanceCalculator:
         rec_coords = df.to_numpy()
         taken_names = set()
         ligand_centres = {}
-        filter_types = ['aromatic', 'hba', 'hbd']
+        filter_types = ['aromatic', 'hba', 'hbd', 'any']
         for idx, ligand in enumerate(ligands):
             try:
                 df = pd.DataFrame()
@@ -855,7 +864,6 @@ class DistanceCalculator:
                     min_dist = self.min_distance_to_ligand_atom_of_interest(
                         rec_coords, ligand, filters[filter_type], factory)
                     df[filter_type] = min_dist
-                df['any'] = df[filter_types].min(axis=1)
                 mol_name = ligand.GetProp('_Name')
                 if mol_name is None:  # Do I trust RDKit to fail?
                     mol_name = 'MOL_{}'.format(idx)
@@ -900,8 +908,8 @@ class DistanceCalculator:
         for idx, lig in enumerate(ligs):
             rec_name = lig.parent.name
             sdfs[idx % cpus].append(lig)
-            recs[idx % cpus].append(
-                lig.parents[2] / 'receptors' / rec_name / 'receptor.pdb')
+            recs[idx % cpus].append(next(Path(
+                lig.parents[2], 'receptors', rec_name).glob('receptor.*')))
             output_paths[idx % cpus].append(Path(output_path, rec_name))
         for i in range(cpus):
             p = mp.Process(
