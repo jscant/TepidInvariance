@@ -3,7 +3,7 @@
 This is the beginnings of a project for infering protein hotspots from real
 data. The models are based on
 [LieConv](https://arxiv.org/abs/2002.12880) and
-[LieTransformer](https://github.com/mfinzi/LieConv) SE(3)-equivariant neural
+[LieTransformer](https://arxiv.org/abs/2012.10885) SE(3)-equivariant neural
 networks.
 
 To install (including dependencies):
