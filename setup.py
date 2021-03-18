@@ -1,6 +1,7 @@
-from setuptools import setup
+from distutils.core import setup
 
 setup(
+    packages=['tepid_invariance'],
     name='tepid_invariance',
     version='0.0.2',
     description='SE(3)-equivariant neural networks for hotspot prediction.',

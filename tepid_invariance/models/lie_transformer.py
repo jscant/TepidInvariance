@@ -4,7 +4,7 @@ from lie_conv.lieGroups import SE3
 from lie_conv.utils import Pass
 from torch import nn
 
-from models.point_neural_network import PointNeuralNetwork
+from tepid_invariance.models.point_neural_network import PointNeuralNetwork
 
 
 class LieTransformer(PointNeuralNetwork):

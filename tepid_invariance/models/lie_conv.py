@@ -5,7 +5,7 @@ from lie_conv.lieGroups import SE3
 from lie_conv.masked_batchnorm import MaskBatchNormNd
 from lie_conv.utils import Pass
 
-from models.point_neural_network import PointNeuralNetwork
+from tepid_invariance.models.point_neural_network import PointNeuralNetwork
 
 
 class LieResNet(PointNeuralNetwork):

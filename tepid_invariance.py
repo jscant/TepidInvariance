@@ -6,10 +6,10 @@ import wandb
 import yaml
 from lie_conv.lieGroups import SE3
 
-from models.lie_conv import LieResNet
-from models.lie_transformer import LieTransformer
-from parse_args import parse_args
-from preprocessing.data_loaders import LieTransformerLabelledAtomsDataset
+from src.models.lie_conv import LieResNet
+from src.models.lie_transformer import LieTransformer
+from src.parse_args import parse_args
+from src.preprocessing.data_loaders import LieTransformerLabelledAtomsDataset
 
 if __name__ == '__main__':
     args = parse_args()

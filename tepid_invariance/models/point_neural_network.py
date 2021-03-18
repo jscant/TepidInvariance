@@ -15,9 +15,9 @@ from einops import repeat
 from rdkit import Chem, RDLogger
 from torch import nn
 
-from preprocessing.pdb_to_paruqet import DistanceCalculator, \
+from tepid_invariance.preprocessing.pdb_to_parquet import DistanceCalculator, \
     get_centre_coordinates
-from utils import get_eta, format_time, print_with_overwrite
+from tepid_invariance.utils import get_eta, format_time, print_with_overwrite
 
 
 class PointNeuralNetwork(nn.Module):
@@ -299,7 +299,8 @@ class PointNeuralNetwork(nn.Module):
         # used for accurate atom typing, but only biopython can be used to set
         # b-factor information.
         rec_fname = Path(rec_fname).expanduser()
-        output_fname = str(Path(output_fname).expanduser())
+        output_fname = Path(output_fname).expanduser()
+        output_fname.parent.mkdir(exist_ok=True, parents=True)
         receptor_bp = dc.read_file(rec_fname, False, read_type='biopython')
         receptor_ob = dc.read_file(rec_fname, False, read_type='openbabel')
 
@@ -369,7 +370,7 @@ class PointNeuralNetwork(nn.Module):
         # Write modified PDB to disk
         io = PDB.PDBIO()
         io.set_structure(receptor_bp)
-        io.save(output_fname)
+        io.save(str(output_fname))
 
         print()
         print('Receptor:', rec_fname)

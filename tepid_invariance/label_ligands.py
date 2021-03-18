@@ -10,8 +10,8 @@ from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from rdkit import Chem, RDLogger, RDConfig
 from rdkit.Chem import ChemicalFeatures
 
-from preprocessing.pdb_to_paruqet import get_positions, get_aromatic_indices, \
-    get_hbd_indices, get_hba_indices
+from tepid_invariance.preprocessing.pdb_to_parquet import get_positions, \
+    get_aromatic_indices, get_hbd_indices, get_hba_indices
 
 
 class PDBStringParser(PDB.PDBParser):
