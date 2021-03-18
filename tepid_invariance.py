@@ -6,10 +6,11 @@ import wandb
 import yaml
 from lie_conv.lieGroups import SE3
 
-from src.models.lie_conv import LieResNet
-from src.models.lie_transformer import LieTransformer
-from src.parse_args import parse_args
-from src.preprocessing.data_loaders import LieTransformerLabelledAtomsDataset
+from tepid_invariance.models.lie_conv import LieResNet
+from tepid_invariance.models.lie_transformer import LieTransformer
+from tepid_invariance.parse_args import parse_args
+from tepid_invariance.preprocessing.data_loaders import \
+    LieTransformerLabelledAtomsDataset
 
 if __name__ == '__main__':
     args = parse_args()

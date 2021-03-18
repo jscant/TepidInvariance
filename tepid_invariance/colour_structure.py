@@ -24,7 +24,7 @@ def colour_structure(model, rec, lig, out):
     model_type = cmd_line_args['model']
     model_class = {
         'lietransformer': LieTransformer, 'lieconv': LieResNet}[model_type]
-    model_obj = model_class(Path(), 0, 0, **model_kwargs)
+    model_obj = model_class(Path(), 0, 0, silent=True, **model_kwargs)
 
     checkpoint = torch.load(model)
     model_obj.load_state_dict(checkpoint['model_state_dict'])

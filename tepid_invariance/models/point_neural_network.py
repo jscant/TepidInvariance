@@ -24,8 +24,7 @@ class PointNeuralNetwork(nn.Module):
     """Base class for node classification and regression tasks."""
 
     def __init__(self, save_path, learning_rate, weight_decay=None,
-                 mode='classification', wandb_project=None, wandb_run=None,
-                 **model_kwargs):
+                 mode='classification', silent=False, **model_kwargs):
         super().__init__()
         self.batch = 0
         self.epoch = 0
@@ -49,16 +48,13 @@ class PointNeuralNetwork(nn.Module):
         else:
             self.loss = nn.MSELoss()
 
-        self.wandb_project = wandb_project
-        self.wandb_path = self.save_path / 'wandb_{}'.format(wandb_project)
-        self.wandb_run = wandb_run
-
         self.build_net(**model_kwargs)
         self.optimiser = torch.optim.Adam(
             self.parameters(), lr=self.lr, weight_decay=weight_decay)
 
-        with open(save_path / 'model_kwargs.yaml', 'w') as f:
-            yaml.dump(model_kwargs, f)
+        if not silent:
+            with open(save_path / 'model_kwargs.yaml', 'w') as f:
+                yaml.dump(model_kwargs, f)
 
         self.apply(self.xavier_init)
         self.cuda()

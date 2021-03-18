@@ -14,7 +14,6 @@ setup(
         'pyyaml',
         'einops',
         'matplotlib',
-        'pybel',
         'scipy'
     ],
 )
