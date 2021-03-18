@@ -42,7 +42,7 @@ files must all be in the same sdf or mol2 file under
 ## Preparation of input data
 
 The inputs to the model are in the more memory-efficient pandas parquet format.
-The script `preprocessing/pdb_to_parquet.py` handles converting pdb, sdf
+The script `tepid_invariance/preprocessing/pdb_to_parquet.py` handles converting pdb, sdf
 and mol2 files into parquet files, as well as converting the atom type to
 a smina-style `types` number (1-12), depending on the atomic number and
 chemical environment. The distance of the receptor atoms to the nearest ligand
