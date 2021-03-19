@@ -146,10 +146,13 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
             dist = torch.from_numpy(struct[self.filter].to_numpy())
         else:
             dist = struct[self.filter].to_numpy()
-            dist = np.ma.masked_where(
-                dist < self.binary_threshold, dist, copy=False).mask
-            dist = np.array(dist, dtype='bool')
-            dist = torch.from_numpy(dist)
+            if sum(dist) < 0:
+                dist = torch.zeros(len(struct))
+            else:
+                dist = np.ma.masked_where(
+                    dist < self.binary_threshold, dist, copy=False).mask
+                dist = np.array(dist, dtype='bool')
+                dist = torch.from_numpy(dist)
 
         return p, v, m, dist, filename, len(struct)
 

@@ -18,8 +18,6 @@ def colour_structure(model, rec, lig, out):
         model_kwargs = yaml.load(f, Loader=yaml.Loader)
     with open(model.parents[1] / 'cmd_line_args.yaml', 'r') as f:
         cmd_line_args = yaml.load(f, Loader=yaml.Loader)
-    print(model_kwargs)
-    print(cmd_line_args)
 
     model_type = cmd_line_args['model']
     model_class = {

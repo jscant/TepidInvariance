@@ -864,6 +864,7 @@ class DistanceCalculator:
                     min_dist = self.min_distance_to_ligand_atom_of_interest(
                         rec_coords, ligand, filters[filter_type], factory)
                     df[filter_type] = min_dist
+
                 mol_name = ligand.GetProp('_Name')
                 if mol_name is None:  # Do I trust RDKit to fail?
                     mol_name = 'MOL_{}'.format(idx)
