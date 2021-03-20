@@ -4,7 +4,6 @@ import warnings
 from collections import defaultdict
 from pathlib import Path
 
-import pybel
 from Bio import PDB as PDB
 from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from rdkit import Chem, RDLogger, RDConfig
@@ -12,6 +11,11 @@ from rdkit.Chem import ChemicalFeatures
 
 from tepid_invariance.preprocessing.pdb_to_parquet import get_positions, \
     get_aromatic_indices, get_hbd_indices, get_hba_indices
+
+try:
+    from openbabel import pybel
+except ImportError:
+    import pybel
 
 
 class PDBStringParser(PDB.PDBParser):

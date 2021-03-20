@@ -28,13 +28,17 @@ from pathlib import Path
 import numpy as np
 import openbabel
 import pandas as pd
-import pybel
 import yaml
 from Bio import PDB as PDB
 from Bio.SeqUtils import seq1
 from rdkit import Chem, RDLogger, RDConfig
 from rdkit.Chem import ChemicalFeatures
 from scipy.spatial.distance import cdist
+
+try:
+    from openbabel import pybel
+except ImportError:
+    import pybel
 
 
 # We don't require a FeatureFactory

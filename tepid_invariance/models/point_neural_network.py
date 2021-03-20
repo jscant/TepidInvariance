@@ -6,7 +6,6 @@ from pathlib import Path
 import Bio.PDB as PDB
 import numpy as np
 import pandas as pd
-import pybel
 import torch
 import torch.nn.functional as F
 import wandb
@@ -18,6 +17,11 @@ from torch import nn
 from tepid_invariance.preprocessing.pdb_to_parquet import DistanceCalculator, \
     get_centre_coordinates
 from tepid_invariance.utils import get_eta, format_time, print_with_overwrite
+
+try:
+    from openbabel import pybel
+except ImportError:
+    import pybel
 
 
 class PointNeuralNetwork(nn.Module):

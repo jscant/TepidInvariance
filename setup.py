@@ -15,5 +15,6 @@ setup(
         'einops',
         'matplotlib',
         'scipy'
+        'openbabel'
     ],
 )
