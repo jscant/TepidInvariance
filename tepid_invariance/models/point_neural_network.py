@@ -20,7 +20,7 @@ from tepid_invariance.utils import get_eta, format_time, print_with_overwrite
 
 try:
     from openbabel import pybel
-except ImportError:
+except (ModuleNotFoundError, ImportError):
     import pybel
 
 

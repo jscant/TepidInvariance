@@ -14,7 +14,7 @@ from tepid_invariance.preprocessing.pdb_to_parquet import get_positions, \
 
 try:
     from openbabel import pybel
-except ImportError:
+except (ModuleNotFoundError, ImportError):
     import pybel
 
 

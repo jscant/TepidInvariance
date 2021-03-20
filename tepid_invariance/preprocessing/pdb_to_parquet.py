@@ -37,7 +37,7 @@ from scipy.spatial.distance import cdist
 
 try:
     from openbabel import pybel
-except ImportError:
+except (ModuleNotFoundError, ImportError):
     import pybel
 
 
