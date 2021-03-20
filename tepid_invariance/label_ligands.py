@@ -83,7 +83,12 @@ def label_ligand(
     bp_structure = pdb_parser.get_structure('mol', pdb_str)
     for atom in bp_structure.get_atoms():
         x, y, z = [str(i) for i in atom.get_coord()]
-        aromatic = pos_to_aromaticity[x][y][z]
+        try:
+            aromatic = pos_to_aromaticity[x][y][z]
+        except KeyError:
+            print('Position', x, y, z, 'not found. Output {} failed'.format(
+                output_fname))
+            return
         atom.set_bfactor(int(aromatic))
 
     io = PDB.PDBIO()
