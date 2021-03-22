@@ -18,19 +18,19 @@ pdb_to_parquet.py <base_path> <output_path>
     └── receptor_a
         └── receptor.pdb
 """
-import argparse
 import multiprocessing as mp
-import os
 from builtins import enumerate
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 from pathlib import Path
 
 import numpy as np
-import openbabel
 import pandas as pd
 import yaml
 from Bio import PDB as PDB
 from Bio.SeqUtils import seq1
+from openbabel import openbabel
+from plip.basic.supplemental import extract_pdbid
+from plip.exchange.webservices import fetch_pdb
 from rdkit import Chem, RDLogger, RDConfig
 from rdkit.Chem import ChemicalFeatures
 from scipy.spatial.distance import cdist
@@ -39,6 +39,15 @@ try:
     from openbabel import pybel
 except (ModuleNotFoundError, ImportError):
     import pybel
+
+import argparse
+import os
+
+from plip.structure.preparation import PDBComplex
+
+RESIDUE_IDS = {'MET', 'ARG', 'SER', 'TRP', 'HIS', 'CYS', 'LYS', 'GLU', 'THR',
+               'LEU', 'TYR', 'PRO', 'ASN', 'ASP', 'PHE', 'GLY', 'VAL', 'ALA',
+               'ILE', 'GLN'}
 
 
 # We don't require a FeatureFactory
@@ -145,8 +154,7 @@ class DistanceCalculator:
     """
 
     def __init__(self):
-
-        self.etab = openbabel.OBElementTable()
+        # self.etab = openbabel.OBElementTable()
         self.non_ad_metal_names = [
             "Cu",
             "Fe",
@@ -672,22 +680,34 @@ class DistanceCalculator:
         if read_type == 'biopython':
             parser = PDB.PDBParser()
             return parser.get_structure('receptor', infile)
-        molecules = []
+        elif read_type == 'plip':
+            mol = PDBComplex()
+            mol.load_pdb(str(infile), as_string=False)
+            if add_hydrogens:
+                mol.protcomplex.OBMol.AddPolarHydrogens()
+                mol.protcomplex.write('pdb', str(infile), overwrite=True)
 
-        suffix = Path(infile).suffix[1:]
-        file_read = pybel.readfile(suffix, str(infile))
+            for ligand in mol.ligands:
+                mol.characterize_complex(ligand)
+            return mol
+        else:
+            molecules = []
 
-        for mol in file_read:
-            molecules.append(mol)
+            suffix = Path(infile).suffix[1:]
+            file_read = pybel.readfile(suffix, str(infile))
 
-        if len(molecules) != 1:
-            raise RuntimeError('More than one molecule detected in PDB file.')
+            for mol in file_read:
+                molecules.append(mol)
 
-        mol = molecules[0]
+            if len(molecules) != 1:
+                raise RuntimeError(
+                    'More than one molecule detected in PDB file.')
 
-        if add_hydrogens:
-            mol.OBMol.AddHydrogens()
-        return mol
+            mol = molecules[0]
+
+            if add_hydrogens:
+                mol.OBMol.AddHydrogens()
+            return mol
 
     @staticmethod
     def adjust_smina_type(t, h_bonded, hetero_bonded):
@@ -744,7 +764,7 @@ class DistanceCalculator:
         })
 
         # Get symbol
-        ename = self.etab.GetSymbol(atomic_number)
+        ename = openbabel.GetSymbol(atomic_number)
 
         # Do we need to adjust symbol?
         if condition_fns[atomic_number]():
@@ -797,6 +817,156 @@ class DistanceCalculator:
             # but including this here to make it equivalent to the cpp code
             return "NumTypes"
 
+    def download_pdbs_from_csv(self, csv, output_dir):
+        output_dir = Path(output_dir).expanduser()
+        pdbids = set()
+        with open(csv, 'r') as f:
+            for line in f.readlines():
+                pdbids.add(
+                    *[chunk.strip() for chunk in line.strip().split(',')])
+        paths = []
+        for pdbid in pdbids:
+            path = Path(output_dir / pdbid / 'receptor.pdb')
+            if not path.exists():
+                self.download_pdb_file(pdbid, output_dir / pdbid)
+            paths.append(path)
+        return paths
+
+    @staticmethod
+    def download_pdb_file(pdbid, output_dir):
+        """Given a PDB ID, downloads the corresponding PDB structure.
+        Checks for validity of ID and handles error while downloading.
+        Returns the path of the downloaded file (From PLIP)"""
+        output_dir = Path(output_dir).expanduser()
+        if len(pdbid) != 4 or extract_pdbid(
+                pdbid.lower()) == 'UnknownProtein':
+            raise RuntimeError('Unknown protein ' + pdbid)
+        pdbfile, pdbid = fetch_pdb(pdbid.lower())
+        pdbpath = output_dir / 'receptor.pdb'
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with open(pdbpath, 'w') as g:
+            g.write(pdbfile)
+        print('File downloaded as', pdbpath)
+        return pdbpath
+
+    def _multiprocess_calculate_interactions(
+            self, pdbfiles, output_paths, remove_suspected_duplicates=True):
+        for pdbfile, output_path in zip(pdbfiles, output_paths):
+            self.calculate_interactions(
+                pdbfile, output_path, remove_suspected_duplicates)
+
+    def calculate_interactions(self, pdbfile, output_path,
+                               remove_suspected_duplicates=True):
+        output_path = Path(output_path).expanduser()
+        output_path.mkdir(parents=True, exist_ok=True)
+        mol = self.read_file(pdbfile, True, read_type='plip')
+        interaction_info = defaultdict(dict)
+        already_processed = set()
+        data = namedtuple('interaction_set', 'df ligand_centre')
+
+        for mol_name, pl_interaction in mol.interaction_sets.items():
+            if remove_suspected_duplicates:
+                chunks = mol_name.split(':')
+                identifying_name = chunks[0] + chunks[-1]
+                if identifying_name in already_processed:
+                    continue
+                already_processed.add(identifying_name)
+            hbonds_rec_acceptors = pl_interaction.hbonds_ldon
+            hbonds_rec_donators = pl_interaction.hbonds_pdon
+            interaction_info[mol_name]['rec_acceptors'] = np.array([
+                h.a_orig_idx for h in hbonds_rec_acceptors], dtype=np.int32)
+            interaction_info[mol_name]['rec_donors'] = np.array([
+                h.d_orig_idx for h in hbonds_rec_donators], dtype=np.int32)
+
+            pi_lists = [interaction.proteinring.atoms_orig_idx for interaction
+                        in pl_interaction.pistacking]
+            interaction_info[mol_name]['pi_stacking'] = np.array([
+                idx for idx_list in pi_lists for idx in idx_list],
+                dtype=np.int32)
+
+            hydrophobic_indices = np.array([
+                interaction.bsatom_orig_idx for interaction
+                in pl_interaction.hydrophobic_contacts], dtype=np.int32)
+            interaction_info[mol_name]['hydrophobic'] = hydrophobic_indices
+            interaction_info[mol_name]['ligand_indices'] = None
+            for ligand in mol.ligands:
+                lig_name = ligand.mol.title
+                if lig_name == mol_name:
+                    interaction_info[mol_name]['ligand_indices'] = np.array(
+                        list(ligand.can_to_pdb.values()), dtype=np.int32)
+                    interaction_info[mol_name][
+                        'mean_ligand_coords'] = [
+                        float('{:.3f}'.format(i)) for i in np.mean(
+                            np.array([np.array(atom.coords) for
+                                      atom in ligand.mol.atoms]), axis=0)]
+                    break
+            if interaction_info[mol_name]['ligand_indices'] is None:
+                raise RuntimeError(
+                    'No indexing information found for {}'.format(mol_name))
+
+        all_ligand_indices = [info['ligand_indices'] for info in
+                              interaction_info.values()]
+        all_ligand_indices = [idx for idx_list in all_ligand_indices
+                              for idx in idx_list]
+
+        results = []
+        for ligand_name, info in interaction_info.items():
+            xs, ys, zs, types, atomic_nums, atomids = [], [], [], [], [], []
+            for atomid, atom in mol.atoms.items():
+                if atom.OBAtom.GetResidue().GetName().upper() not in RESIDUE_IDS \
+                        or atomid in all_ligand_indices:
+                    continue
+                atomids.append(atomid)
+                smina_type = self.obatom_to_smina_type(atom)
+                if smina_type == "NumTypes":
+                    smina_type_int = len(self.atom_type_data)
+                else:
+                    smina_type_int = self.atom_types.index(smina_type)
+                type_int = self.type_map[smina_type_int]
+
+                x, y, z = [float('{:.3f}'.format(i)) for i in atom.coords]
+                xs.append(x)
+                ys.append(y)
+                zs.append(z)
+                types.append(type_int)
+                atomic_nums.append(atom.atomicnum)
+
+            pistacking = np.zeros((len(types),), dtype=np.int32)
+            hydrophobic = np.zeros_like(pistacking)
+            hba = np.zeros_like(pistacking)
+            hbd = np.zeros_like(pistacking)
+
+            pistacking[info['pi_stacking'] - 1] = 1
+            hydrophobic[info['hydrophobic'] - 1] = 1
+            hba[info['rec_acceptors'] - 1] = 1
+            hbd[info['rec_donors'] - 1] = 1
+
+            df = pd.DataFrame()
+            df['atom_id'] = atomids
+            df['x'] = xs
+            df['y'] = ys
+            df['z'] = zs
+            df['atomic_number'] = atomic_nums
+
+            df['types'] = types
+            df['pistacking'] = pistacking
+            df['hydrophobic'] = hydrophobic
+            df['hba'] = hba
+            df['hbd'] = hbd
+            df = df[df['atomic_number'] > 1]
+            results.append(data(
+                df=df, ligand_centre=info['mean_ligand_coords']))
+
+        ligand_centres = {}
+        for idx, result in enumerate(results):
+            mol_name = 'ligand_{0}'.format(idx)
+            out_name = mol_name + '.parquet'
+            result.df.to_parquet(output_path / out_name)
+            ligand_centres[mol_name] = result.ligand_centre
+
+        with open(output_path / 'ligand_centres.yaml', 'w') as f:
+            yaml.dump(ligand_centres, f)
+
     def calculate_distances_and_write_parqets(
             self, rec_fname, lig_fname, output_path):
 
@@ -817,7 +987,7 @@ class DistanceCalculator:
         output_path.mkdir(parents=True, exist_ok=True)
 
         ligands = Chem.SDMolSupplier(str(lig_fname))
-        receptor = self.read_file(rec_fname, False)
+        receptor = self.read_file(rec_fname, False, read_type='openbabel')
 
         xs, ys, zs = [], [], []
         types = []
@@ -901,6 +1071,33 @@ class DistanceCalculator:
             self.calculate_distances_and_write_parqets(
                 rec, sdf, output_path)
 
+    def parallel_process_directory(self, base_path, output_path):
+        """Use multiprocessing to process all receptors in base_path."""
+        base_path = Path(base_path)
+        all_pdbs = base_path.glob('**/receptor.pdb')
+        jobs = []
+        cpus = mp.cpu_count()
+        pdbs = [[] for _ in range(cpus)]
+        output_paths = [[] for _ in range(cpus)]
+        for idx, pdb in enumerate(all_pdbs):
+            rec_name = pdb.parent.name
+            pdbs[idx % cpus].append(pdb)
+            output_paths[idx % cpus].append(Path(output_path, rec_name))
+        for i in range(cpus):
+            p = mp.Process(
+                target=self._multiprocess_calculate_interactions,
+                args=(pdbs[i], output_paths[i], True))
+            jobs.append(p)
+            p.start()
+            print('Started worker', i)
+
+    def download_and_process(self, pdb_list, output_path):
+        output_path = Path(output_path).expanduser()
+        pdb_output = output_path / 'pdb'
+        parquet_output = output_path / 'parquets'
+        self.download_pdbs_from_csv(pdb_list, pdb_output)
+        self.parallel_process_directory(pdb_output, parquet_output)
+
     def process_all_in_directory(self, base_path, output_path):
         """Use multiprocessing to process all receptors in base_path."""
         base_path = Path(base_path)
@@ -927,18 +1124,12 @@ class DistanceCalculator:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('receptor', type=str,
-                        help='PDB file containing receptor atom coordinates')
+    parser.add_argument('pdb_list', type=str,
+                        help='CSV file containing PDB IDs of structures to be '
+                             'processed')
     parser.add_argument('output_path', type=str,
                         help='Directory in which to save output')
-    parser.add_argument('--ligand', '-l', type=str,
-                        help='SDF file containing ligand coordinates (possibly '
-                             'multiple molecules)')
     args = parser.parse_args()
 
     dt = DistanceCalculator()
-    if args.ligand is not None:
-        dt.calculate_distances_and_write_parqets(
-            args.receptor, args.ligand, args.output_path)
-    else:
-        dt.process_all_in_directory(args.receptor, args.output_path)
+    dt.download_and_process(args.pdb_list, args.output_path)
