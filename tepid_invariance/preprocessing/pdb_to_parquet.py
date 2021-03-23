@@ -19,6 +19,7 @@ pdb_to_parquet.py <base_path> <output_path>
         └── receptor.pdb
 """
 import multiprocessing as mp
+import urllib
 from builtins import enumerate
 from collections import defaultdict, namedtuple
 from pathlib import Path
@@ -822,15 +823,29 @@ class DistanceCalculator:
         pdbids = set()
         with open(csv, 'r') as f:
             for line in f.readlines():
-                pdbids.add(
-                    *[chunk.strip() for chunk in line.strip().split(',')])
-        paths = []
+                pdbids.add(line.split(',')[0].lower())
+        cpus = mp.cpu_count()
+        pdb_job_lists = [[] for _ in range(cpus)]
+        output_job_lists = [[] for _ in range(cpus)]
+        idx = 0
         for pdbid in pdbids:
             path = Path(output_dir / pdbid / 'receptor.pdb')
             if not path.exists():
-                self.download_pdb_file(pdbid, output_dir / pdbid)
-            paths.append(path)
-        return paths
+                pdb_job_lists[idx % cpus].append(pdbid)
+                output_job_lists[idx % cpus].append(output_dir / pdbid)
+                idx += 1
+        jobs = []
+        for i in range(cpus):
+            p = mp.Process(
+                target=self._parallel_download_pdbs,
+                args=(pdb_job_lists[i], output_job_lists[i]))
+            jobs.append(p)
+            p.start()
+            print('Started worker', i)
+
+    def _parallel_download_pdbs(self, csvs, output_dirs):
+        for csv, output_dir in zip(csvs, output_dirs):
+            self.download_pdb_file(csv, output_dir)
 
     @staticmethod
     def download_pdb_file(pdbid, output_dir):
@@ -841,7 +856,14 @@ class DistanceCalculator:
         if len(pdbid) != 4 or extract_pdbid(
                 pdbid.lower()) == 'UnknownProtein':
             raise RuntimeError('Unknown protein ' + pdbid)
-        pdbfile, pdbid = fetch_pdb(pdbid.lower())
+        while True:
+            try:
+                pdbfile, pdbid = fetch_pdb(pdbid.lower())
+            except urllib.error.URLError:
+                print('Fetching pdb {} failed, retrying...'.format(
+                    pdbid))
+            else:
+                break
         pdbpath = output_dir / 'receptor.pdb'
         output_dir.mkdir(parents=True, exist_ok=True)
         with open(pdbpath, 'w') as g:
@@ -850,13 +872,15 @@ class DistanceCalculator:
         return pdbpath
 
     def _multiprocess_calculate_interactions(
-            self, pdbfiles, output_paths, remove_suspected_duplicates=True):
-        for pdbfile, output_path in zip(pdbfiles, output_paths):
+            self, pdbfiles, output_paths, hets,
+            remove_suspected_duplicates=True):
+        for pdbfile, output_path, hetset in zip(pdbfiles, output_paths, hets):
             self.calculate_interactions(
-                pdbfile, output_path, remove_suspected_duplicates)
+                pdbfile, hetset, output_path, remove_suspected_duplicates)
 
-    def calculate_interactions(self, pdbfile, output_path,
+    def calculate_interactions(self, pdbfile, hets, output_path,
                                remove_suspected_duplicates=True):
+        print(pdbfile)
         output_path = Path(output_path).expanduser()
         output_path.mkdir(parents=True, exist_ok=True)
         mol = self.read_file(pdbfile, True, read_type='plip')
@@ -865,12 +889,18 @@ class DistanceCalculator:
         data = namedtuple('interaction_set', 'df ligand_centre')
 
         for mol_name, pl_interaction in mol.interaction_sets.items():
+            chunks = mol_name.split(':')
+            if chunks[0] not in hets:
+                # Some other ligand or metal ion we aren't interested in
+                continue
             if remove_suspected_duplicates:
-                chunks = mol_name.split(':')
+                # We don't want duplicates caused by n-mers
                 identifying_name = chunks[0] + chunks[-1]
                 if identifying_name in already_processed:
                     continue
                 already_processed.add(identifying_name)
+
+            # Process interactions
             hbonds_rec_acceptors = pl_interaction.hbonds_ldon
             hbonds_rec_donators = pl_interaction.hbonds_pdon
             interaction_info[mol_name]['rec_acceptors'] = np.array([
@@ -889,6 +919,8 @@ class DistanceCalculator:
                 in pl_interaction.hydrophobic_contacts], dtype=np.int32)
             interaction_info[mol_name]['hydrophobic'] = hydrophobic_indices
             interaction_info[mol_name]['ligand_indices'] = None
+
+            #
             for ligand in mol.ligands:
                 lig_name = ligand.mol.title
                 if lig_name == mol_name:
@@ -904,18 +936,21 @@ class DistanceCalculator:
                 raise RuntimeError(
                     'No indexing information found for {}'.format(mol_name))
 
-        all_ligand_indices = [info['ligand_indices'] for info in
-                              interaction_info.values()]
+        all_ligand_indices = [
+            list(ligand.can_to_pdb.values()) for ligand in mol.ligands]
         all_ligand_indices = [idx for idx_list in all_ligand_indices
                               for idx in idx_list]
 
         results = []
+
         for ligand_name, info in interaction_info.items():
             xs, ys, zs, types, atomic_nums, atomids = [], [], [], [], [], []
+            keep_atoms = []
             for atomid, atom in mol.atoms.items():
-                if atom.OBAtom.GetResidue().GetName().upper() not in RESIDUE_IDS \
-                        or atomid in all_ligand_indices:
-                    continue
+                if atom.OBAtom.GetResidue().GetName().upper() in RESIDUE_IDS \
+                        and atomid not in all_ligand_indices and \
+                        atom.atomicnum > 1:
+                    keep_atoms.append(atomid)
                 atomids.append(atomid)
                 smina_type = self.obatom_to_smina_type(atom)
                 if smina_type == "NumTypes":
@@ -931,6 +966,13 @@ class DistanceCalculator:
                 types.append(type_int)
                 atomic_nums.append(atom.atomicnum)
 
+            xs = np.array(xs, dtype=int)
+            ys = np.array(ys, dtype=int)
+            zs = np.array(zs, dtype=int)
+            types = np.array(types, dtype=int)
+            atomids = np.array(atomids, dtype=int)
+            atomic_nums = np.array(atomic_nums, dtype=int)
+
             pistacking = np.zeros((len(types),), dtype=np.int32)
             hydrophobic = np.zeros_like(pistacking)
             hba = np.zeros_like(pistacking)
@@ -940,6 +982,20 @@ class DistanceCalculator:
             hydrophobic[info['hydrophobic'] - 1] = 1
             hba[info['rec_acceptors'] - 1] = 1
             hbd[info['rec_donors'] - 1] = 1
+
+            mask = np.zeros_like(pistacking)
+            mask[keep_atoms] = 1
+
+            pistacking = pistacking[np.where(keep_atoms)]
+            hydrophobic = hydrophobic[np.where(keep_atoms)]
+            hba = hba[np.where(keep_atoms)]
+            hbd = hbd[np.where(keep_atoms)]
+            xs = xs[np.where(keep_atoms)]
+            ys = ys[np.where(keep_atoms)]
+            zs = zs[np.where(keep_atoms)]
+            types = types[np.where(keep_atoms)]
+            atomic_nums = atomic_nums[np.where(keep_atoms)]
+            atomids = atomids[np.where(keep_atoms)]
 
             df = pd.DataFrame()
             df['atom_id'] = atomids
@@ -953,19 +1009,19 @@ class DistanceCalculator:
             df['hydrophobic'] = hydrophobic
             df['hba'] = hba
             df['hbd'] = hbd
-            df = df[df['atomic_number'] > 1]
             results.append(data(
                 df=df, ligand_centre=info['mean_ligand_coords']))
 
-        ligand_centres = {}
-        for idx, result in enumerate(results):
-            mol_name = 'ligand_{0}'.format(idx)
-            out_name = mol_name + '.parquet'
-            result.df.to_parquet(output_path / out_name)
-            ligand_centres[mol_name] = result.ligand_centre
+        if len(results):
+            ligand_centres = {}
+            for idx, result in enumerate(results):
+                mol_name = 'ligand_{0}'.format(idx)
+                out_name = mol_name + '.parquet'
+                result.df.to_parquet(output_path / out_name)
+                ligand_centres[mol_name] = result.ligand_centre
 
-        with open(output_path / 'ligand_centres.yaml', 'w') as f:
-            yaml.dump(ligand_centres, f)
+            with open(output_path / 'ligand_centres.yaml', 'w') as f:
+                yaml.dump(ligand_centres, f)
 
     def calculate_distances_and_write_parqets(
             self, rec_fname, lig_fname, output_path):
@@ -1071,32 +1127,45 @@ class DistanceCalculator:
             self.calculate_distances_and_write_parqets(
                 rec, sdf, output_path)
 
-    def parallel_process_directory(self, base_path, output_path):
+    def parallel_process_directory(self, base_path, output_path, het_map):
         """Use multiprocessing to process all receptors in base_path."""
         base_path = Path(base_path)
         all_pdbs = base_path.glob('**/receptor.pdb')
         jobs = []
         cpus = mp.cpu_count()
         pdbs = [[] for _ in range(cpus)]
+        hets = [[] for _ in range(cpus)]
         output_paths = [[] for _ in range(cpus)]
         for idx, pdb in enumerate(all_pdbs):
             rec_name = pdb.parent.name
             pdbs[idx % cpus].append(pdb)
+            hets[idx % cpus].append(het_map[rec_name.lower()])
             output_paths[idx % cpus].append(Path(output_path, rec_name))
         for i in range(cpus):
             p = mp.Process(
                 target=self._multiprocess_calculate_interactions,
-                args=(pdbs[i], output_paths[i], True))
+                args=(pdbs[i], output_paths[i], hets[i], True))
             jobs.append(p)
             p.start()
             print('Started worker', i)
+
+    @staticmethod
+    def get_het_map(pdb_list):
+        het_map = defaultdict(set)
+        with open(pdb_list, 'r') as f:
+            for line in f.readlines():
+                pdbid, het = line.strip().split(',')
+                if len(het) == 3:
+                    het_map[pdbid.lower()].add(het.upper())
+        return het_map
 
     def download_and_process(self, pdb_list, output_path):
         output_path = Path(output_path).expanduser()
         pdb_output = output_path / 'pdb'
         parquet_output = output_path / 'parquets'
         self.download_pdbs_from_csv(pdb_list, pdb_output)
-        self.parallel_process_directory(pdb_output, parquet_output)
+        het_map = self.get_het_map(pdb_list)
+        self.parallel_process_directory(pdb_output, parquet_output, het_map)
 
     def process_all_in_directory(self, base_path, output_path):
         """Use multiprocessing to process all receptors in base_path."""
