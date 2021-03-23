@@ -880,7 +880,7 @@ class DistanceCalculator:
 
     def calculate_interactions(self, pdbfile, hets, output_path,
                                remove_suspected_duplicates=True):
-        print(pdbfile)
+
         output_path = Path(output_path).expanduser()
         output_path.mkdir(parents=True, exist_ok=True)
         mol = self.read_file(pdbfile, True, read_type='plip')
@@ -890,15 +890,16 @@ class DistanceCalculator:
 
         for mol_name, pl_interaction in mol.interaction_sets.items():
             chunks = mol_name.split(':')
-            if chunks[0] not in hets:
+            het = ':'.join(chunks[:-1])  # Het id : chain id
+            if het not in hets:
                 # Some other ligand or metal ion we aren't interested in
                 continue
             if remove_suspected_duplicates:
                 # We don't want duplicates caused by n-mers
-                identifying_name = chunks[0] + chunks[-1]
-                if identifying_name in already_processed:
+                if het in already_processed:
                     continue
-                already_processed.add(identifying_name)
+                already_processed.add(het)
+            print(pdbfile, mol_name)
 
             # Process interactions
             hbonds_rec_acceptors = pl_interaction.hbonds_ldon
@@ -920,7 +921,6 @@ class DistanceCalculator:
             interaction_info[mol_name]['hydrophobic'] = hydrophobic_indices
             interaction_info[mol_name]['ligand_indices'] = None
 
-            #
             for ligand in mol.ligands:
                 lig_name = ligand.mol.title
                 if lig_name == mol_name:
@@ -1154,9 +1154,10 @@ class DistanceCalculator:
         het_map = defaultdict(set)
         with open(pdb_list, 'r') as f:
             for line in f.readlines():
-                pdbid, het = line.strip().split(',')
+                pdbid, het, chain = line.strip().split(',')
                 if len(het) == 3:
-                    het_map[pdbid.lower()].add(het.upper())
+                    het_map[pdbid.lower()].add(
+                        ':'.join([het.upper(), chain.upper()]))
         return het_map
 
     def download_and_process(self, pdb_list, output_path):
@@ -1190,8 +1191,18 @@ class DistanceCalculator:
             p.start()
             print('Started worker', i)
 
+    def _test_single_file(self, pdbfile):
+        pdbfile = Path(pdbfile).expanduser()
+        hetmap = self.get_het_map('data/scpdb/binding_sites_fixed.csv')
+        hetset = hetmap[pdbfile.parent.name]
+        self.calculate_interactions(pdbfile, hetset, 'test')
+
 
 if __name__ == '__main__':
+    dt = DistanceCalculator()
+    dt._test_single_file('data/scpdb/pdb/11bg/receptor.pdb')  # 11bg
+    exit(0)
+
     parser = argparse.ArgumentParser()
     parser.add_argument('pdb_list', type=str,
                         help='CSV file containing PDB IDs of structures to be '
