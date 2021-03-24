@@ -789,7 +789,7 @@ class DistanceCalculator:
                 print('Fetching pdb {} failed, retrying...'.format(
                     pdbid))
             except RuntimeError:
-                return None
+                return pdbid
             else:
                 break
 
