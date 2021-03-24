@@ -33,9 +33,8 @@ def one_hot(numerical_category, num_classes):
 class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
     """Class for feeding structure parquets into network."""
 
-    def __init__(self, base_path, rot=True, binary_threshold=None,
-                 max_suffix=np.inf, radius=12, inverse=False, atom_filter='any',
-                 **kwargs):
+    def __init__(self, base_path, atom_filter, rot=True, max_suffix=np.inf,
+                 radius=12, receptors=None, **kwargs):
         """Initialise dataset.
         Arguments:
             base_path: path containing the 'receptors' and 'ligands'
@@ -43,6 +42,11 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
                 and folders called <rec_name>_[active|decoy] which in turn
                 contain <ligand_name>.parquets files. All parquets files from
                 this directory are recursively loaded into the dataset.
+            atom_filter: one of 'pi_stacking', 'hydrophobic', 'hba', or 'hbd';
+                the type of interaction to predict for.
+            rot: whether or not to randomly rotate the inputs.
+            max_suffix: if the filenames end in *_<x> where <x> is some integer,
+                ignore files where x > max_suffix.
             radius: size of the bounding box; all atoms further than <radius>
                 Angstroms from the mean ligand atom position are discarded.
             receptors: iterable of strings denoting receptors to include in
@@ -53,13 +57,12 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
 
         super().__init__(**kwargs)
         self.filter = atom_filter
-        self.binary_threshold = binary_threshold
         self.rot = random_rotation if rot else lambda x: x
         self.radius = radius
-        self.inverse = inverse
 
         self.base_path = Path(base_path).expanduser()
-        self.filenames = [f for f in self.base_path.glob('**/*.parquet') if
+        self.filenames = [f for f in self.base_path.glob('**/*.parquet')
+                          if max_suffix == np.inf or
                           int(Path(f.name).stem.split('_')[-1]) <= max_suffix]
 
         receptors = set()
@@ -98,7 +101,7 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
             now).
         """
         rec_name = filename.parent.name
-        lig_name = filename.name
+        lig_name = Path(filename.name).stem
         struct = pd.read_parquet(filename)
         mean_coords = self.ligand_coordinate_info[rec_name][lig_name]
         mean_x, mean_y, mean_z = mean_coords
@@ -109,10 +112,6 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
                              struct['y'] ** 2 +
                              struct['z'] ** 2)
         struct['atom_idx'] = np.arange(len(struct))
-
-        if self.inverse:
-            struct['dist'] = np.maximum(
-                np.zeros((len(struct),)), 1 / struct['dist'])
 
         struct = struct[struct.sq_dist < self.radius ** 2].copy()
         return struct
@@ -142,17 +141,7 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
             torch.as_tensor(struct.types.to_numpy()), 11), 0)
         m = torch.from_numpy(np.ones((1, len(struct))))
 
-        if self.binary_threshold is None:
-            dist = torch.from_numpy(struct[self.filter].to_numpy())
-        else:
-            dist = struct[self.filter].to_numpy()
-            if sum(dist) < 0:
-                dist = torch.zeros(len(struct))
-            else:
-                dist = np.ma.masked_where(
-                    dist < self.binary_threshold, dist, copy=False).mask
-                dist = np.array(dist, dtype='bool')
-                dist = torch.from_numpy(dist)
+        dist = torch.from_numpy(struct[self.filter].to_numpy())
 
         return p, v, m, dist, filename, len(struct)
 
