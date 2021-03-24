@@ -5,7 +5,7 @@ from plip.basic.remote import VisualizerData
 from plip.visualization.pymol import PyMOLVisualizer
 from pymol import cmd, stored
 
-
+import pandas as pd
 class VisualizerDataWithMolecularInfo(VisualizerData):
     """VisualizerData but with the mol, ligand and pli objects stored."""
 
@@ -36,9 +36,6 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
 
         centre_coords = find_ligand_centre(self.plcomplex.ligand)
         print(self.plcomplex.uid, centre_coords)
-        for atom in self.plcomplex.ligand.molecule.atoms:
-            print(atom.atomicnum, atom.coords)
-        print()
         mean_x, mean_y, mean_z = centre_coords
 
         df['x'] -= mean_x
@@ -46,6 +43,7 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
         df['z'] -= mean_z
         df['sq_dist'] = (df['x'] ** 2 + df['y'] ** 2 + df['z'] ** 2)
         df = df[df.sq_dist < radius ** 2].copy()
+        del df['sq_dist']
 
         labelled_indices = df['atom_id'].to_numpy()
         unlabelled_indices = np.setdiff1d(all_indices, labelled_indices)
@@ -60,6 +58,12 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
             model((p.cuda(),
                    v.cuda(),
                    m.cuda()))).cpu().detach().numpy()[0, :].squeeze()
+
+        df['probability'] = model_labels
+        with pd.option_context('display.max_colwidth', None):
+            with pd.option_context('display.max_rows', None):
+                with pd.option_context('display.max_columns', None):
+                    print(df)
 
         atom_to_bfactor_map = {
             labelled_indices[i]: model_labels[i] for i in range(len(df))}
@@ -96,7 +100,7 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
         cmd.alter(self.protname, '%s=stored.b(chain, resi, name, ID, %s)' % (
             'b', 'b'))
         print(self.ligname)
-        #cmd.spectrum('b', 'white_red', 'not ({})'.format(self.ligname))
+        # cmd.spectrum('b', 'white_red', 'not ({})'.format(self.ligname))
         cmd.show('sticks', 'b > 0 and not ({})'.format(self.ligname))
         cmd.rebuild()
 

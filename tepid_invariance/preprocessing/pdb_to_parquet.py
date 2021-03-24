@@ -789,7 +789,8 @@ class DistanceCalculator:
             else:
                 break
         if pdbfile is None:
-            return None
+            print('None')
+            return 'none'
         output_dir.mkdir(parents=True, exist_ok=True)
         with open(pdbpath, 'w') as g:
             g.write(pdbfile)
@@ -901,6 +902,10 @@ class DistanceCalculator:
         """Write parquet files with interactions for each interaction site."""
         pdbfile = Path(pdbfile).expanduser()
         output_path = Path(output_path).expanduser()
+        if Path(output_path / 'ligand_centres.yaml').is_file():
+            print(pdbfile, 'has already been processed.')
+            return
+
         output_path.mkdir(parents=True, exist_ok=True)
         mol = self.read_file(pdbfile, True, read_type='plip')
         interaction_info = defaultdict(dict)
