@@ -20,9 +20,10 @@ pdb_to_parquet.py <base_path> <output_path>
 """
 import multiprocessing as mp
 import urllib
-from builtins import enumerate
 from collections import defaultdict, namedtuple
 from pathlib import Path
+from urllib.error import HTTPError
+from urllib.request import urlopen
 
 import numpy as np
 import pandas as pd
@@ -30,7 +31,7 @@ import yaml
 from Bio import PDB as PDB
 from openbabel import openbabel
 from plip.basic.supplemental import extract_pdbid
-from plip.exchange.webservices import fetch_pdb
+from plipcmd import logger
 
 try:
     from openbabel import pybel
@@ -44,6 +45,23 @@ from plip.structure.preparation import PDBComplex
 RESIDUE_IDS = {'MET', 'ARG', 'SER', 'TRP', 'HIS', 'CYS', 'LYS', 'GLU', 'THR',
                'LEU', 'TYR', 'PRO', 'ASN', 'ASP', 'PHE', 'GLY', 'VAL', 'ALA',
                'ILE', 'GLN'}
+
+
+def fetch_pdb(pdbid):
+    """Modified plip function."""
+    pdbid = pdbid.lower()
+    pdburl = f'https://files.rcsb.org/download/{pdbid}.pdb'
+    try:
+        pdbfile = urlopen(pdburl).read().decode()
+        # If no PDB file is available, a text is now shown with "We're sorry, but ..."
+        # Could previously be distinguished by an HTTP error
+        if 'sorry' in pdbfile:
+            logger.error(
+                'no file in PDB format available from wwPDB for the given PDB ID.')
+    except HTTPError:
+        logger.error(
+            'no file in PDB format available from wwPDB for the given PDB ID')
+    return [pdbfile, pdbid]
 
 
 class Info:
