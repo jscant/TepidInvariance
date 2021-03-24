@@ -31,7 +31,6 @@ import yaml
 from Bio import PDB as PDB
 from openbabel import openbabel
 from plip.basic.supplemental import extract_pdbid
-from plipcmd import logger
 
 try:
     from openbabel import pybel
@@ -56,11 +55,10 @@ def fetch_pdb(pdbid):
         # If no PDB file is available, a text is now shown with "We're sorry, but ..."
         # Could previously be distinguished by an HTTP error
         if 'sorry' in pdbfile:
-            logger.error(
-                'no file in PDB format available from wwPDB for the given PDB ID.')
+            print('No file in PDB format available from wwPDB for', pdbid)
     except HTTPError:
-        logger.error(
-            'no file in PDB format available from wwPDB for the given PDB ID')
+            print(
+                'No file in PDB format available from wwPDB for', pdbid)
     return [pdbfile, pdbid]
 
 
