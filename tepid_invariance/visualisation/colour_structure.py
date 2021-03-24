@@ -133,7 +133,7 @@ def visualize_in_pymol(model, plcomplex, radius=12):
             pdbid.upper(),
             "_".join([hetid, plcomplex.chain, plcomplex.position]))
         print(filename)
-        vis.save_session(config.OUTPATH)
+        vis.save_session(plcomplex.mol.output_path, override=filename)
     if config.PICS:
         vis.save_picture(config.OUTPATH, filename)
 
