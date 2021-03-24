@@ -747,23 +747,9 @@ class DistanceCalculator:
             for line in f.readlines():
                 pdbids.add(line.split(',')[0].lower())
         cpus = mp.cpu_count()
-        pdb_job_lists = [[] for _ in range(cpus)]
-        output_job_lists = [[] for _ in range(cpus)]
-        idx = 0
-        for pdbid in pdbids:
-            path = Path(output_dir / pdbid / 'receptor.pdb')
-            if not path.exists():
-                pdb_job_lists[idx % cpus].append(pdbid)
-                output_job_lists[idx % cpus].append(output_dir / pdbid)
-                idx += 1
-        jobs = []
-        for i in range(cpus):
-            p = mp.Process(
-                target=self._parallel_download_pdbs,
-                args=(pdb_job_lists[i], output_job_lists[i]))
-            jobs.append(p)
-            p.start()
-            print('Started worker', i)
+        inputs = [(pdbid, output_dir / pdbid) for pdbid in pdbids]
+        with mp.Pool(processes=cpus) as pool:
+            pool.starmap(self.download_pdb_file, inputs)
 
     def _parallel_download_pdbs(self, csvs, output_dirs):
         for csv, output_dir in zip(csvs, output_dirs):
