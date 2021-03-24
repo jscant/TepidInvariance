@@ -107,6 +107,7 @@ def parse_args():
                         help='Maximum integer at end of filename: for example, '
                              'CHEMBL123456_4.parquet would be included with '
                              '<--max_suffix 4> but not <--max_suffix 3>.')
-    parser.add_argument('--inverse', action='store_true',
-                        help='Regression is performed on the inverse distance.')
+    parser.add_argument('--weighted_loss', action='store_true',
+                        help='Node classification loss is weighted by label '
+                             'frequency')
     return parser.parse_args()

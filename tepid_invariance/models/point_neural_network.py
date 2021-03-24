@@ -20,7 +20,8 @@ class PointNeuralNetwork(nn.Module):
     """Base class for node classification and regression tasks."""
 
     def __init__(self, save_path, learning_rate, weight_decay=None,
-                 mode='classification', silent=False, **model_kwargs):
+                 mode='classification', silent=False, weighted_loss=False,
+                 **model_kwargs):
         super().__init__()
         self.batch = 0
         self.epoch = 0
@@ -29,21 +30,16 @@ class PointNeuralNetwork(nn.Module):
         self.save_path.mkdir(parents=True, exist_ok=True)
         self.predictions_file = self.save_path / 'predictions.txt'
         self.mode = mode
+        self.weighted_loss = weighted_loss
 
         self.loss_plot_file = self.save_path / 'loss.png'
 
         self.lr = learning_rate
         self.weight_decay = weight_decay
-        self.translated_actives = model_kwargs.get('translated_actives', None)
-        self.n_translated_actives = model_kwargs.get('n_translated_actives', 0)
 
         self.loss_log_file = self.save_path / 'loss.log'
 
-        if mode == 'classification':
-            # self.loss = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([10.]))
-            self.loss = nn.BCEWithLogitsLoss()
-        else:
-            self.loss = nn.MSELoss()
+        self.loss = nn.BCEWithLogitsLoss(reduction='none')
 
         self.build_net(**model_kwargs)
         self.optimiser = torch.optim.Adam(
@@ -77,9 +73,16 @@ class PointNeuralNetwork(nn.Module):
         """Preprocessing for getting the inputs."""
         return x.cuda()
 
-    def _get_loss(self, y_true, y_pred):
+    def _get_loss(self, y_true, y_pred, weighted=False):
         """Process the loss."""
-        return self.loss(y_pred, y_true)
+        if not weighted:
+            return torch.mean(self.loss(y_pred, y_true))
+        total_nodes = np.product(y_true.shape)
+        positive_nodes = float(torch.sum(y_true))
+        ratio = total_nodes / positive_nodes
+        _loss = self.loss(y_pred, y_true)
+        _loss[torch.where(y_true)] *= ratio
+        return torch.mean(_loss)
 
     def optimise(self, data_loader, epochs=1):
         """Train the network.
@@ -126,7 +129,7 @@ class PointNeuralNetwork(nn.Module):
                 mean_positive_prediction += np.mean(y_pred_np[positive_indices])
                 mean_negative_prediction += np.mean(y_pred_np[negative_indices])
 
-                loss += self._get_loss(y_true, y_pred)
+                loss += self._get_loss(y_true, y_pred, self.weighted_loss)
 
                 if not (self.batch + 1) % aggrigation_interval:
                     self.optimiser.zero_grad()

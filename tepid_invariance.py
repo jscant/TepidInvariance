@@ -37,7 +37,7 @@ if __name__ == '__main__':
         'feature_embed_dim': None,
         'max_sample_norm': None,
         'lie_algebra_nonlinearity': None,
-        'dropout': args.dropout
+        'dropout': args.dropout,
     }
 
     torch.manual_seed(0)
@@ -55,10 +55,12 @@ if __name__ == '__main__':
     if args.model == 'lieconv':
         model = LieResNet(
             args.save_path, args.learning_rate, args.weight_decay, mode=mode,
+            weighted_loss=args.weighted_loss,
             **model_kwargs)
     elif args.model == 'lietransformer':
         model = LieTransformer(
             args.save_path, args.learning_rate, args.weight_decay, mode=mode,
+            weighted_loss=args.weighted_loss,
             **model_kwargs)
     else:
         raise NotImplementedError(
