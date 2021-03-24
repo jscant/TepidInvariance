@@ -142,8 +142,9 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         m = torch.from_numpy(np.ones((1, len(struct))))
 
         dist = torch.from_numpy(struct[self.filter].to_numpy())
+        atomic_numbers = torch.from_numpy(struct['types'].to_numpy())
 
-        return p, v, m, dist, filename, len(struct)
+        return p, v, m, dist, atomic_numbers, len(struct)
 
     @staticmethod
     def collate(batch):
@@ -167,15 +168,15 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         v_batch = torch.zeros(batch_size, max_len, 11)
         m_batch = torch.zeros(batch_size, max_len)
         label_batch = torch.zeros(batch_size, max_len)
-        filenames = []
-        for batch_index, (p, v, m, dist, filename, _) in enumerate(
+        atomic_numbers = torch.zeros_like(m_batch).long()
+        for batch_index, (p, v, m, dist, atomics, _) in enumerate(
                 batch):
             p_batch[batch_index, :p.shape[1], :] = p
             v_batch[batch_index, :v.shape[1], :] = v
             m_batch[batch_index, :m.shape[1]] = m
+            atomic_numbers[batch_index, :len(atomics)] = atomics
             try:
                 label_batch[batch_index, :dist.shape[0]] = dist
             except IndexError:  # no positive labels
                 pass
-            filenames.append(filename)
-        return (p_batch, v_batch, m_batch.bool()), label_batch, filenames
+        return (p_batch, v_batch, m_batch.bool()), label_batch, atomic_numbers

@@ -73,15 +73,58 @@ class PointNeuralNetwork(nn.Module):
         """Preprocessing for getting the inputs."""
         return x.cuda()
 
+    def _get_loss_component(self, y_true, y_pred, indices):
+        n_atoms = len(indices[0])
+        if not n_atoms:
+            return torch.FloatTensor([0])
+        atoms_true = y_true[indices]
+        atoms_pred = y_pred[indices]
+        n_positives = int(torch.sum(atoms_true))
+
+        n_positives = max(1., n_positives)  # div0 errors avoided
+        N_ratio = (n_atoms - n_positives) / n_positives
+        loss = self.loss(atoms_pred, atoms_true)
+        loss[torch.where(atoms_true)] *= N_ratio
+        loss = torch.mean(loss)
+        return loss
+
+    def _get_types_component(self, y_true, y_pred, n):
+        indices = torch.where(self.types == n)
+        n_atoms = len(indices[0])
+        if not n_atoms:
+            return torch.FloatTensor([0])
+        atoms_true = y_true[indices]
+        atoms_pred = y_pred[indices]
+        n_positives = int(torch.sum(atoms_true))
+
+        n_positives = max(1., n_positives)  # div0 errors avoided
+        N_ratio = (n_atoms - n_positives) / n_positives
+        loss = self.loss(atoms_pred, atoms_true)
+        loss[torch.where(atoms_true)] *= N_ratio
+        loss = torch.mean(loss)
+        return loss
+
     def _get_loss(self, y_true, y_pred, weighted=False):
         """Process the loss."""
         if not weighted:
             return torch.mean(self.loss(y_pred, y_true))
+
+        loss = torch.FloatTensor([0]).cuda()
+        for n in range(1, 12):
+            loss += self._get_types_component(y_true, y_pred, n).cuda()
+        return loss / 11
+
+        # Other experimental loss functions
+        for component in [
+            self.N_indices, self.O_indices, self.C_indices, self.F_indices]:
+            loss += self._get_loss_component(y_true, y_pred, component).cuda()
+        return loss / 4
+
         total_nodes = np.product(y_true.shape)
         positive_nodes = float(torch.sum(y_true))
         ratio = total_nodes / positive_nodes
         _loss = self.loss(y_pred, y_true)
-        _loss[torch.where(y_true)] *= ratio
+        _loss[torch.where(y_true)] *= min(10, ratio)
         return torch.mean(_loss)
 
     def optimise(self, data_loader, epochs=1):
@@ -113,7 +156,7 @@ class PointNeuralNetwork(nn.Module):
             loss = torch.FloatTensor([0.0]).cuda()
             mean_positive_prediction, mean_negative_prediction = 0., 0.
             n_positive, n_negative = 0, 0
-            for self.batch, (x, y_true, filenames) in enumerate(
+            for self.batch, (x, y_true, atomic_numbers) in enumerate(
                     data_loader):
 
                 x = self._process_inputs(x)
@@ -128,6 +171,12 @@ class PointNeuralNetwork(nn.Module):
                 n_negative += len(negative_indices[0])
                 mean_positive_prediction += np.mean(y_pred_np[positive_indices])
                 mean_negative_prediction += np.mean(y_pred_np[negative_indices])
+
+                self.types = atomic_numbers
+                self.C_indices = torch.where(atomic_numbers == 6)
+                self.N_indices = torch.where(atomic_numbers == 7)
+                self.O_indices = torch.where(atomic_numbers == 8)
+                self.F_indices = torch.where(atomic_numbers == 9)
 
                 loss += self._get_loss(y_true, y_pred, self.weighted_loss)
 
