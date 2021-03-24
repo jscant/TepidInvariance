@@ -788,8 +788,7 @@ class DistanceCalculator:
             except urllib.error.URLError:
                 print('Fetching pdb {} failed, retrying...'.format(
                     pdbid))
-            except RuntimeError as e:
-                print(e)
+            except RuntimeError:
                 return None
             else:
                 break
