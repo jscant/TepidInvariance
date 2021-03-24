@@ -751,16 +751,16 @@ class DistanceCalculator:
         with mp.Pool(processes=cpus) as pool:
             pool.starmap(self.download_pdb_file, inputs)
 
-    def _parallel_download_pdbs(self, csvs, output_dirs):
-        for csv, output_dir in zip(csvs, output_dirs):
-            self.download_pdb_file(csv, output_dir)
-
     @staticmethod
     def download_pdb_file(pdbid, output_dir):
         """Given a PDB ID, downloads the corresponding PDB structure.
         Checks for validity of ID and handles error while downloading.
         Returns the path of the downloaded file (From PLIP)"""
         output_dir = Path(output_dir).expanduser()
+        pdbpath = output_dir / 'receptor.pdb'
+        if pdbpath.is_file():
+            print(pdbpath, 'already exists.')
+            return
         if len(pdbid) != 4 or extract_pdbid(
                 pdbid.lower()) == 'UnknownProtein':
             raise RuntimeError('Unknown protein ' + pdbid)
@@ -772,7 +772,7 @@ class DistanceCalculator:
                     pdbid))
             else:
                 break
-        pdbpath = output_dir / 'receptor.pdb'
+
         output_dir.mkdir(parents=True, exist_ok=True)
         with open(pdbpath, 'w') as g:
             g.write(pdbfile)
