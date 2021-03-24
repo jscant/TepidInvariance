@@ -44,14 +44,14 @@ if __name__ == '__main__':
     random.seed(0)
     np.random.seed(0)
     ds = LieTransformerLabelledAtomsDataset(
-        args.train_data_root, binary_threshold=args.binary_threshold,
-        radius=args.radius, max_suffix=args.max_suffix, inverse=args.inverse,
+        args.train_data_root,
+        radius=args.radius, max_suffix=args.max_suffix,
         atom_filter=args.filter)
     dl = torch.utils.data.DataLoader(
         ds, shuffle=True, batch_size=args.batch_size, collate_fn=ds.collate,
         drop_last=True)
 
-    mode = 'regression' if args.binary_threshold is None else 'classification'
+    mode = 'classification'
     if args.model == 'lieconv':
         model = LieResNet(
             args.save_path, args.learning_rate, args.weight_decay, mode=mode,
