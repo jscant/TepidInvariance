@@ -55,10 +55,11 @@ def fetch_pdb(pdbid):
         # If no PDB file is available, a text is now shown with "We're sorry, but ..."
         # Could previously be distinguished by an HTTP error
         if 'sorry' in pdbfile:
-            print('No file in PDB format available from wwPDB for', pdbid)
-    except HTTPError:
-            print(
+            raise RuntimeError(
                 'No file in PDB format available from wwPDB for', pdbid)
+    except HTTPError:
+        raise RuntimeError(
+            'No file in PDB format available from wwPDB for', pdbid)
     return [pdbfile, pdbid]
 
 
@@ -787,6 +788,9 @@ class DistanceCalculator:
             except urllib.error.URLError:
                 print('Fetching pdb {} failed, retrying...'.format(
                     pdbid))
+            except RuntimeError as e:
+                print(e)
+                return None
             else:
                 break
 
