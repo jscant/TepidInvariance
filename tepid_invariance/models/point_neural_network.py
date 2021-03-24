@@ -1,21 +1,13 @@
 import time
 from abc import abstractmethod
-from collections import defaultdict
 from pathlib import Path
 
-import Bio.PDB as PDB
 import numpy as np
-import pandas as pd
 import torch
-import torch.nn.functional as F
 import wandb
 import yaml
-from einops import repeat
-from rdkit import Chem, RDLogger
 from torch import nn
 
-from tepid_invariance.preprocessing.pdb_to_parquet import DistanceCalculator, \
-    get_centre_coordinates
 from tepid_invariance.utils import get_eta, format_time, print_with_overwrite
 
 try:
@@ -48,6 +40,7 @@ class PointNeuralNetwork(nn.Module):
         self.loss_log_file = self.save_path / 'loss.log'
 
         if mode == 'classification':
+            # self.loss = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([10.]))
             self.loss = nn.BCEWithLogitsLoss()
         else:
             self.loss = nn.MSELoss()
@@ -74,11 +67,13 @@ class PointNeuralNetwork(nn.Module):
             x = layer(x)
         return x
 
-    def _get_y_true(self, y):
+    @staticmethod
+    def _get_y_true(y):
         """Preprocessing for getting the true node labels."""
         return y.cuda()
 
-    def _process_inputs(self, x):
+    @staticmethod
+    def _process_inputs(x):
         """Preprocessing for getting the inputs."""
         return x.cuda()
 
@@ -251,128 +246,3 @@ class PointNeuralNetwork(nn.Module):
             m.weight.data.fill_(1)
             if m.bias is not None:
                 m.bias.data.fill_(0)
-
-    def colour_pdb(self, rec_fname, lig_fname, output_fname, radius=12):
-        """Use model to set b-factor values for each atom to node label.
-
-        This method can be used to visualise the output of point-cloud based
-        atom labelling neural networks. The atom labels are stored in a PDB
-        file which has the same entries as the receptor input PDB file, with
-        the b-factor field filled in to the value given by each atom in the
-        network. This can then be visualised in pymol using the commands:
-
-            load <output_fname>
-            spectrum b, red_white_blue
-
-        Arguments:
-            rec_fname: pdb file containing the protein input
-            lig_fname: sdf or mol2 file containing the ligand input. This is
-                only used to find the bounding box
-            output_fname: where to store the output pdb file
-            radius: radius of the bounding box, centred on the ligand
-
-        Raises:
-            RuntimeError if the ligand cannot be extracted from the input.
-        """
-
-        # RDKit and Openbabel are extremely verbose
-        RDLogger.DisableLog('*')
-        pybel.ob.obErrorLog.SetOutputLevel(0)
-
-        # Extract bounding box location
-        centre_coords = None
-        if Path(lig_fname).suffix == '.sdf':
-            for item in Chem.SDMolSupplier(str(Path(lig_fname).expanduser())):
-                centre_coords = get_centre_coordinates(item)
-                break
-        else:
-            for item in Chem.MolFromMol2File(str(Path(lig_fname).expanduser())):
-                centre_coords = get_centre_coordinates(item)
-                break
-        if centre_coords is None:
-            raise RuntimeError('Unable to extract ligand from {}'.format(
-                lig_fname))
-
-        dc = DistanceCalculator()
-
-        # Extract openbabel and biopython protein objects. Openbabel must be
-        # used for accurate atom typing, but only biopython can be used to set
-        # b-factor information.
-        rec_fname = Path(rec_fname).expanduser()
-        output_fname = Path(output_fname).expanduser()
-        output_fname.parent.mkdir(exist_ok=True, parents=True)
-        receptor_bp = dc.read_file(rec_fname, False, read_type='biopython')
-        receptor_ob = dc.read_file(rec_fname, False, read_type='openbabel')
-
-        # Set up bookkeeping so we can go between openbabel and biopython,
-        # because openbabel types and indices do not translate to biopython
-        # so we have to use coordinates as indices...
-        pos_to_idx = defaultdict(lambda: defaultdict(lambda: dict()))
-
-        xs, ys, zs = [], [], []
-        types, pdb_types = [], []
-        for idx, ob_atom in enumerate(receptor_ob):
-            smina_type = dc.obatom_to_smina_type(ob_atom)
-            if smina_type == "NumTypes":
-                smina_type_int = len(self.atom_type_data)
-            else:
-                smina_type_int = dc.atom_types.index(smina_type)
-            type_int = dc.type_map[smina_type_int]
-
-            ainfo = [i for i in ob_atom.coords]
-            ainfo.append(type_int)
-            str_coords = [str(i) for i in ob_atom.coords]
-            pos_to_idx[str_coords[0]][str_coords[1]][str_coords[2]] = idx
-
-            xs.append(ainfo[0] - centre_coords[0])
-            ys.append(ainfo[1] - centre_coords[1])
-            zs.append(ainfo[2] - centre_coords[2])
-            types.append(ainfo[3])
-
-        # Extract information about atoms in bounding box
-        xs, ys, zs = np.array(xs), np.array(ys), np.array(zs)
-        df = pd.DataFrame()
-        df['x'] = xs
-        df['y'] = ys
-        df['z'] = zs
-        df['types'] = types
-        df['atom_idx'] = np.arange(len(df))
-        df['sq_vec'] = df['x'] ** 2 + df['y'] ** 2 + df['z'] ** 2
-        df = df[df.sq_vec < radius ** 2].copy()
-
-        # Openbabel and biopython do not use the same indexing so we have to be
-        # sneaky...
-        included_indices = df['atom_idx'].to_numpy()
-        coords = torch.from_numpy(
-            np.vstack([df['x'], df['y'], df['z']]).T).float()
-        coords = repeat(coords, 'a b -> n a b', n=2)
-        feats = F.one_hot(
-            torch.from_numpy(df['types'].to_numpy()), num_classes=11).float()
-        feats = repeat(feats, 'a b -> n a b', n=2)
-        mask = torch.ones(2, feats.shape[1]).bool()
-
-        # Obtain the atom labels from the network
-        labels = torch.sigmoid(
-            self((coords.cuda(),
-                  feats.cuda(),
-                  mask.cuda()))).cpu().detach().numpy()[0, :].squeeze()
-
-        # Set probability of atoms in bounding box, all others set to zero
-        all_labels = np.zeros((len(xs),))
-        all_labels[included_indices] = labels
-
-        # Finally we can set the b-factors using biopython
-        for atom in receptor_bp.get_atoms():
-            x, y, z = atom.get_coord()
-            ob_idx = pos_to_idx[str(x)][str(y)][str(z)]
-            atom.set_bfactor(all_labels[ob_idx])
-
-        # Write modified PDB to disk
-        io = PDB.PDBIO()
-        io.set_structure(receptor_bp)
-        io.save(str(output_fname))
-
-        print()
-        print('Receptor:', rec_fname)
-        print('Ligand:', lig_fname)
-        print('Output:', output_fname)

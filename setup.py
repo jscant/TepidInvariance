@@ -3,7 +3,7 @@ from distutils.core import setup
 setup(
     packages=['tepid_invariance'],
     name='tepid_invariance',
-    version='0.0.3',
+    version='0.1.0',
     description='SE(3)-equivariant neural networks for hotspot prediction.',
     author='Jack Scantlebury',
     install_requires=[
@@ -16,6 +16,7 @@ setup(
         'matplotlib',
         'scipy'
         'openbabel',
-        'plip'
+        'plip',
+        'pathtools'
     ],
 )

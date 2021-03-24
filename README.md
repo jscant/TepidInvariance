@@ -9,8 +9,12 @@ networks.
 To install (including dependencies):
 
 ```
-conda install -c conda-forge rdkit -y
-conda install -c openbabel openbabel -y
+# Download and install OpenBabel >= 3.0.1 and PLIP
+# https://github.com/pharmai/plip
+# https://github.com/openbabel/openbabel
+```
+then:
+```
 git clone https://github.com/jscant/TepidInvariance.git
 cd TepidInvariance
 pip install -r requirements.txt

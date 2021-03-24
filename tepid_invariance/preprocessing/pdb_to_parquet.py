@@ -28,13 +28,9 @@ import numpy as np
 import pandas as pd
 import yaml
 from Bio import PDB as PDB
-from Bio.SeqUtils import seq1
 from openbabel import openbabel
 from plip.basic.supplemental import extract_pdbid
 from plip.exchange.webservices import fetch_pdb
-from rdkit import Chem, RDLogger, RDConfig
-from rdkit.Chem import ChemicalFeatures
-from scipy.spatial.distance import cdist
 
 try:
     from openbabel import pybel
@@ -42,74 +38,12 @@ except (ModuleNotFoundError, ImportError):
     import pybel
 
 import argparse
-import os
 
 from plip.structure.preparation import PDBComplex
 
 RESIDUE_IDS = {'MET', 'ARG', 'SER', 'TRP', 'HIS', 'CYS', 'LYS', 'GLU', 'THR',
                'LEU', 'TYR', 'PRO', 'ASN', 'ASP', 'PHE', 'GLY', 'VAL', 'ALA',
                'ILE', 'GLN'}
-
-
-# We don't require a FeatureFactory
-def get_aromatic_indices(rdkit_mol, _=None):
-    """Get indices of all atoms in aromatic rings (rdkit)."""
-    return [atom.GetIdx() for atom in rdkit_mol.GetAromaticAtoms()]
-
-
-def get_hba_indices(rdkit_mol, factory):
-    """Get indices of all hydrogen bond acceptors (redkit)."""
-    feats = factory.GetFeaturesForMol(rdkit_mol)
-    return set([feat.GetAtomIds()[0] for feat in feats
-                if feat.GetFamily() == 'Acceptor'])
-
-
-def get_hbd_indices(rdkit_mol, factory):
-    """Get indices of all hydrogen bond donors (redkit)."""
-    feats = factory.GetFeaturesForMol(rdkit_mol)
-    return set([feat.GetAtomIds()[0] for feat in feats
-                if feat.GetFamily() == 'Donor'])
-
-
-def get_aromatic_atom_coords(rdkit_mol, _=None):
-    """Get coordinates of all atoms in aromatic rings (rdkit)."""
-    aromatic_indices = get_aromatic_indices(rdkit_mol)
-    return get_positions(rdkit_mol)[aromatic_indices, :]
-
-
-def get_hba_atom_coords(rdkit_mol, factory):
-    """Get coordinates of all hydrogen bond acceptors (redkit)."""
-    ids = get_hba_indices(rdkit_mol, factory)
-    coords = get_positions(rdkit_mol)
-    return coords[np.array(list(ids), dtype=np.int).squeeze(), :]
-
-
-def get_hbd_atom_coords(rdkit_mol, factory):
-    """Get coordinates of all hydrogen bond donors (redkit)."""
-    ids = get_hbd_indices(rdkit_mol, factory)
-    coords = get_positions(rdkit_mol)
-    return coords[np.array(list(ids), dtype=np.int).squeeze(), :]
-
-
-# conf.GetPositions often segfaults (RDKit bug)
-def get_positions(rdkit_mol):
-    """Get n x 3 numpy array containing positions of all atoms (rdkit)."""
-    conf = rdkit_mol.GetConformer(0)
-    return np.array(
-        [conf.GetAtomPosition(i) for i in range(rdkit_mol.GetNumAtoms())])
-
-
-# overloaded for convenience in other uses
-def get_positions(rdkit_mol, _=None):
-    """Get n x 3 numpy array containing positions of all atoms (rdkit)."""
-    conf = rdkit_mol.GetConformer(0)
-    return np.array(
-        [conf.GetAtomPosition(i) for i in range(rdkit_mol.GetNumAtoms())])
-
-
-def get_centre_coordinates(rdkit_mol):
-    """Get mean atom position (rdkit)."""
-    return np.mean(get_positions(rdkit_mol), axis=0)
 
 
 class Info:
@@ -653,18 +587,6 @@ class DistanceCalculator:
         return out_dict
 
     @staticmethod
-    def min_distance_to_ligand_atom_of_interest(
-            rec_coords, lig, atom_filter=None, factory=None):
-        if atom_filter is None:
-            lig_coords = get_positions(lig)
-        else:
-            lig_coords = atom_filter(lig, factory)
-        if not len(lig_coords):
-            return -1
-        distances = cdist(rec_coords, lig_coords, metric='euclidean')
-        return np.amin(distances, axis=1)
-
-    @staticmethod
     def read_file(infile, add_hydrogens, read_type='openbabel'):
         """Use openbabel to read in a pdb file.
 
@@ -871,24 +793,122 @@ class DistanceCalculator:
         print('File downloaded as', pdbpath)
         return pdbpath
 
-    def _multiprocess_calculate_interactions(
-            self, pdbfiles, output_paths, hets,
-            remove_suspected_duplicates=True):
-        for pdbfile, output_path, hetset in zip(pdbfiles, output_paths, hets):
-            self.calculate_interactions(
-                pdbfile, hetset, output_path, remove_suspected_duplicates)
+    def mol_calculate_interactions(self, mol, pl_interaction):
+        """Return dataframe with interactions from plip mol object"""
+        interaction_info = {}
+
+        # Process interactions
+        hbonds_rec_acceptors = pl_interaction.hbonds_ldon
+        hbonds_rec_donators = pl_interaction.hbonds_pdon
+        interaction_info['rec_acceptors'] = np.array([
+            h.a_orig_idx for h in hbonds_rec_acceptors], dtype=np.int32)
+        interaction_info['rec_donors'] = np.array([
+            h.d_orig_idx for h in hbonds_rec_donators], dtype=np.int32)
+
+        pi_lists = [interaction.proteinring.atoms_orig_idx for interaction
+                    in pl_interaction.pistacking]
+        interaction_info['pi_stacking'] = np.array([
+            idx for idx_list in pi_lists for idx in idx_list],
+            dtype=np.int32)
+
+        hydrophobic_indices = np.array([
+            interaction.bsatom_orig_idx for interaction
+            in pl_interaction.hydrophobic_contacts], dtype=np.int32)
+        interaction_info['hydrophobic'] = hydrophobic_indices
+
+        all_ligand_indices = [list(ligand.can_to_pdb.values()) for ligand in
+                              mol.ligands]
+        all_ligand_indices = [idx for idx_list in all_ligand_indices for idx in
+                              idx_list]
+
+        return self.featurise_interaction(
+            mol, interaction_info, all_ligand_indices)
+
+    def featurise_interaction(self, mol, interaction_dict, all_ligand_indices):
+        """Return dataframe with interactions from one particular plip site."""
+        xs, ys, zs, types, atomic_nums, atomids = [], [], [], [], [], []
+        keep_atoms = []
+        for atomid, atom in mol.atoms.items():
+            if atom.OBAtom.GetResidue().GetName().upper() in RESIDUE_IDS \
+                    and atomid not in all_ligand_indices and \
+                    atom.atomicnum > 1:
+                keep_atoms.append(atomid)
+            atomids.append(atomid)
+            smina_type = self.obatom_to_smina_type(atom)
+            if smina_type == "NumTypes":
+                smina_type_int = len(self.atom_type_data)
+            else:
+                smina_type_int = self.atom_types.index(smina_type)
+            type_int = self.type_map[smina_type_int]
+
+            x, y, z = [float('{:.3f}'.format(i)) for i in atom.coords]
+            xs.append(x)
+            ys.append(y)
+            zs.append(z)
+            types.append(type_int)
+            atomic_nums.append(atom.atomicnum)
+
+        xs = np.array(xs, dtype=int)
+        ys = np.array(ys, dtype=int)
+        zs = np.array(zs, dtype=int)
+        types = np.array(types, dtype=int)
+        atomids = np.array(atomids, dtype=int)
+        atomic_nums = np.array(atomic_nums, dtype=int)
+
+        pistacking = np.zeros((len(types),), dtype=np.int32)
+        hydrophobic = np.zeros_like(pistacking)
+        hba = np.zeros_like(pistacking)
+        hbd = np.zeros_like(pistacking)
+
+        pistacking[interaction_dict['pi_stacking'] - 1] = 1
+        hydrophobic[interaction_dict['hydrophobic'] - 1] = 1
+        hba[interaction_dict['rec_acceptors'] - 1] = 1
+        hbd[interaction_dict['rec_donors'] - 1] = 1
+
+        mask = np.zeros_like(pistacking)
+        mask[keep_atoms] = 1
+
+        pistacking = pistacking[np.where(keep_atoms)]
+        hydrophobic = hydrophobic[np.where(keep_atoms)]
+        hba = hba[np.where(keep_atoms)]
+        hbd = hbd[np.where(keep_atoms)]
+        xs = xs[np.where(keep_atoms)]
+        ys = ys[np.where(keep_atoms)]
+        zs = zs[np.where(keep_atoms)]
+        types = types[np.where(keep_atoms)]
+        atomic_nums = atomic_nums[np.where(keep_atoms)]
+        atomids = atomids[np.where(keep_atoms)]
+
+        df = pd.DataFrame()
+        df['atom_id'] = atomids
+        df['x'] = xs
+        df['y'] = ys
+        df['z'] = zs
+        df['atomic_number'] = atomic_nums
+
+        df['types'] = types
+        df['pistacking'] = pistacking
+        df['hydrophobic'] = hydrophobic
+        df['hba'] = hba
+        df['hbd'] = hbd
+        return df
 
     def calculate_interactions(self, pdbfile, hets, output_path,
                                remove_suspected_duplicates=True):
-
+        """Write parquet files with interactions for each interaction site."""
+        pdbfile = Path(pdbfile).expanduser()
         output_path = Path(output_path).expanduser()
         output_path.mkdir(parents=True, exist_ok=True)
         mol = self.read_file(pdbfile, True, read_type='plip')
         interaction_info = defaultdict(dict)
         already_processed = set()
-        data = namedtuple('interaction_set', 'df ligand_centre')
+        data = namedtuple('interaction_set', 'pdbid molname df ligand_centre')
 
         for mol_name, pl_interaction in mol.interaction_sets.items():
+            out_name = '{0}_{1}.parquet'.format(
+                pdbfile.parent.name, mol_name.replace(':', '-'))
+            if Path(output_path, out_name).exists():
+                continue
             chunks = mol_name.split(':')
             het = ':'.join(chunks[:-1])  # Het id : chain id
             if het not in hets:
@@ -943,79 +963,17 @@ class DistanceCalculator:
 
         results = []
 
-        for ligand_name, info in interaction_info.items():
-            xs, ys, zs, types, atomic_nums, atomids = [], [], [], [], [], []
-            keep_atoms = []
-            for atomid, atom in mol.atoms.items():
-                if atom.OBAtom.GetResidue().GetName().upper() in RESIDUE_IDS \
-                        and atomid not in all_ligand_indices and \
-                        atom.atomicnum > 1:
-                    keep_atoms.append(atomid)
-                atomids.append(atomid)
-                smina_type = self.obatom_to_smina_type(atom)
-                if smina_type == "NumTypes":
-                    smina_type_int = len(self.atom_type_data)
-                else:
-                    smina_type_int = self.atom_types.index(smina_type)
-                type_int = self.type_map[smina_type_int]
-
-                x, y, z = [float('{:.3f}'.format(i)) for i in atom.coords]
-                xs.append(x)
-                ys.append(y)
-                zs.append(z)
-                types.append(type_int)
-                atomic_nums.append(atom.atomicnum)
-
-            xs = np.array(xs, dtype=int)
-            ys = np.array(ys, dtype=int)
-            zs = np.array(zs, dtype=int)
-            types = np.array(types, dtype=int)
-            atomids = np.array(atomids, dtype=int)
-            atomic_nums = np.array(atomic_nums, dtype=int)
-
-            pistacking = np.zeros((len(types),), dtype=np.int32)
-            hydrophobic = np.zeros_like(pistacking)
-            hba = np.zeros_like(pistacking)
-            hbd = np.zeros_like(pistacking)
-
-            pistacking[info['pi_stacking'] - 1] = 1
-            hydrophobic[info['hydrophobic'] - 1] = 1
-            hba[info['rec_acceptors'] - 1] = 1
-            hbd[info['rec_donors'] - 1] = 1
-
-            mask = np.zeros_like(pistacking)
-            mask[keep_atoms] = 1
-
-            pistacking = pistacking[np.where(keep_atoms)]
-            hydrophobic = hydrophobic[np.where(keep_atoms)]
-            hba = hba[np.where(keep_atoms)]
-            hbd = hbd[np.where(keep_atoms)]
-            xs = xs[np.where(keep_atoms)]
-            ys = ys[np.where(keep_atoms)]
-            zs = zs[np.where(keep_atoms)]
-            types = types[np.where(keep_atoms)]
-            atomic_nums = atomic_nums[np.where(keep_atoms)]
-            atomids = atomids[np.where(keep_atoms)]
-
-            df = pd.DataFrame()
-            df['atom_id'] = atomids
-            df['x'] = xs
-            df['y'] = ys
-            df['z'] = zs
-            df['atomic_number'] = atomic_nums
-
-            df['types'] = types
-            df['pistacking'] = pistacking
-            df['hydrophobic'] = hydrophobic
-            df['hba'] = hba
-            df['hbd'] = hbd
+        for mol_name, info in interaction_info.items():
+            df = self.featurise_interaction(mol, info, all_ligand_indices)
             results.append(data(
+                pdbid=Path(pdbfile.parent.name).stem, molname=mol_name,
                 df=df, ligand_centre=info['mean_ligand_coords']))
 
         if len(results):
             ligand_centres = {}
-            for idx, result in enumerate(results):
-                mol_name = 'ligand_{0}'.format(idx)
+            for result in results:
+                mol_name = '{0}_{1}'.format(
+                    result.pdbid, result.molname.replace(':', '-'))
                 out_name = mol_name + '.parquet'
                 result.df.to_parquet(output_path / out_name)
                 ligand_centres[mol_name] = result.ligand_centre
@@ -1023,131 +981,17 @@ class DistanceCalculator:
             with open(output_path / 'ligand_centres.yaml', 'w') as f:
                 yaml.dump(ligand_centres, f)
 
-    def calculate_distances_and_write_parqets(
-            self, rec_fname, lig_fname, output_path):
-
-        filters = {
-            'aromatics': get_aromatic_atom_coords,
-            'aromatic': get_aromatic_atom_coords,
-            'hba': get_hba_atom_coords,
-            'hbd': get_hbd_atom_coords,
-            'any': get_positions
-        }
-
-        fdefName = os.path.join(RDConfig.RDDataDir, 'BaseFeatures.fdef')
-        factory = ChemicalFeatures.BuildFeatureFactory(fdefName)
-
-        RDLogger.DisableLog('*')
-        pybel.ob.obErrorLog.SetOutputLevel(0)
-        output_path = Path(output_path).expanduser()
-        output_path.mkdir(parents=True, exist_ok=True)
-
-        ligands = Chem.SDMolSupplier(str(lig_fname))
-        receptor = self.read_file(rec_fname, False, read_type='openbabel')
-
-        xs, ys, zs = [], [], []
-        types = []
-        pdb_types = []
-        res_numbers = []
-        res_types = []
-
-        for idx, atom in enumerate(receptor):
-            smina_type = self.obatom_to_smina_type(atom)
-            if smina_type == "NumTypes":
-                smina_type_int = len(self.atom_type_data)
-            else:
-                smina_type_int = self.atom_types.index(smina_type)
-            type_int = self.type_map[smina_type_int]
-
-            ainfo = [i for i in atom.coords]
-            ainfo.append(type_int)
-
-            xs.append(ainfo[0])
-            ys.append(ainfo[1])
-            zs.append(ainfo[2])
-            types.append(ainfo[3])
-            pdb_types.append(
-                atom.residue.OBResidue.GetAtomID(atom.OBAtom).strip())
-            res_number = atom.residue.idx
-            res_type = seq1(atom.residue.name)
-            res_types.append(res_type)
-            res_numbers.append(res_number)
-
-        df = pd.DataFrame()
-        df["x"] = xs
-        df["y"] = ys
-        df["z"] = zs
-
-        rec_coords = df.to_numpy()
-        taken_names = set()
-        ligand_centres = {}
-        filter_types = ['aromatic', 'hba', 'hbd', 'any']
-        for idx, ligand in enumerate(ligands):
-            try:
-                df = pd.DataFrame()
-                df['x'] = xs
-                df['y'] = ys
-                df['z'] = zs
-                df['types'] = types
-
-                for filter_type in filter_types:
-                    min_dist = self.min_distance_to_ligand_atom_of_interest(
-                        rec_coords, ligand, filters[filter_type], factory)
-                    df[filter_type] = min_dist
-
-                mol_name = ligand.GetProp('_Name')
-                if mol_name is None:  # Do I trust RDKit to fail?
-                    mol_name = 'MOL_{}'.format(idx)
-                suffix_template = '_{}'
-                mol_index = 0
-                while mol_name + suffix_template.format(
-                        mol_index) in taken_names:
-                    mol_index += 1
-                mol_name = mol_name + suffix_template.format(mol_index)
-                taken_names.add(mol_name)
-                out_name = mol_name + '.parquet'
-
-                df.to_parquet(output_path / out_name)
-
-                # Yaml doesn't like np.float64 types or arrays
-                ligand_centres[out_name] = [float(i) for i in
-                                            get_centre_coordinates(ligand)]
-            except AttributeError:
-                pass
-            except ValueError:
-                pass
-
-        with open(output_path / 'ligand_centres.yaml', 'w') as f:
-            yaml.dump(ligand_centres, f)
-
-    def _multiprocess_calc(self, recs, sdfs, output_paths):
-        """Wrapper for calculate_distances_and_write_parqets, for use with mp"""
-        print(len(recs))
-        for (rec, sdf, output_path) in zip(recs, sdfs, output_paths):
-            self.calculate_distances_and_write_parqets(
-                rec, sdf, output_path)
-
     def parallel_process_directory(self, base_path, output_path, het_map):
         """Use multiprocessing to process all receptors in base_path."""
-        base_path = Path(base_path)
-        all_pdbs = base_path.glob('**/receptor.pdb')
-        jobs = []
+        base_path = Path(base_path).expanduser()
+        all_pdbs = list(base_path.glob('**/receptor.pdb'))
         cpus = mp.cpu_count()
-        pdbs = [[] for _ in range(cpus)]
-        hets = [[] for _ in range(cpus)]
-        output_paths = [[] for _ in range(cpus)]
-        for idx, pdb in enumerate(all_pdbs):
-            rec_name = pdb.parent.name
-            pdbs[idx % cpus].append(pdb)
-            hets[idx % cpus].append(het_map[rec_name.lower()])
-            output_paths[idx % cpus].append(Path(output_path, rec_name))
-        for i in range(cpus):
-            p = mp.Process(
-                target=self._multiprocess_calculate_interactions,
-                args=(pdbs[i], output_paths[i], hets[i], True))
-            jobs.append(p)
-            p.start()
-            print('Started worker', i)
+        output_paths = [Path(output_path, pdb.parent.name) for pdb in all_pdbs]
+        hets = [het_map[pdb.parent.name] for pdb in all_pdbs]
+        inputs = [(pdb, het, out) for pdb, het, out in zip(
+            all_pdbs, hets, output_paths)]
+        with mp.Pool(processes=cpus) as pool:
+            pool.starmap(self.calculate_interactions, inputs)
 
     @staticmethod
     def get_het_map(pdb_list):
@@ -1168,29 +1012,6 @@ class DistanceCalculator:
         het_map = self.get_het_map(pdb_list)
         self.parallel_process_directory(pdb_output, parquet_output, het_map)
 
-    def process_all_in_directory(self, base_path, output_path):
-        """Use multiprocessing to process all receptors in base_path."""
-        base_path = Path(base_path)
-        ligs = base_path.glob('ligands/*/*.sdf')
-        jobs = []
-        cpus = mp.cpu_count()
-        sdfs = [[] for _ in range(cpus)]
-        recs = [[] for _ in range(cpus)]
-        output_paths = [[] for _ in range(cpus)]
-        for idx, lig in enumerate(ligs):
-            rec_name = lig.parent.name
-            sdfs[idx % cpus].append(lig)
-            recs[idx % cpus].append(next(Path(
-                lig.parents[2], 'receptors', rec_name).glob('receptor.*')))
-            output_paths[idx % cpus].append(Path(output_path, rec_name))
-        for i in range(cpus):
-            p = mp.Process(
-                target=self._multiprocess_calc,
-                args=(recs[i], sdfs[i], output_paths[i]))
-            jobs.append(p)
-            p.start()
-            print('Started worker', i)
-
     def _test_single_file(self, pdbfile):
         pdbfile = Path(pdbfile).expanduser()
         hetmap = self.get_het_map('data/scpdb/binding_sites_fixed.csv')
@@ -1199,9 +1020,9 @@ class DistanceCalculator:
 
 
 if __name__ == '__main__':
-    dt = DistanceCalculator()
-    dt._test_single_file('data/scpdb/pdb/11bg/receptor.pdb')  # 11bg
-    exit(0)
+    # dt = DistanceCalculator()
+    # dt._test_single_file('data/scpdb/pdb/11bg/receptor.pdb')  # 11bg
+    # exit(0)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('pdb_list', type=str,
