@@ -747,7 +747,8 @@ class DistanceCalculator:
             for line in f.readlines():
                 pdbids.add(line.split(',')[0].lower())
         cpus = mp.cpu_count()
-        inputs = [(pdbid, output_dir / pdbid) for pdbid in pdbids]
+        inputs = [(pdbid, output_dir / pdbid) for pdbid in pdbids
+                  if not Path(output_dir, pdbid, 'receptor.pdb').is_file()]
         with mp.Pool(processes=cpus) as pool:
             pool.starmap(self.download_pdb_file, inputs)
 
