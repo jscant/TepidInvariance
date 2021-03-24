@@ -52,14 +52,12 @@ def fetch_pdb(pdbid):
     pdburl = f'https://files.rcsb.org/download/{pdbid}.pdb'
     try:
         pdbfile = urlopen(pdburl).read().decode()
-        # If no PDB file is available, a text is now shown with "We're sorry, but ..."
-        # Could previously be distinguished by an HTTP error
         if 'sorry' in pdbfile:
-            raise RuntimeError(
-                'No file in PDB format available from wwPDB for', pdbid)
+            print('No file in PDB format available from wwPDB for', pdbid)
+            return None, None
     except HTTPError:
-        raise RuntimeError(
-            'No file in PDB format available from wwPDB for', pdbid)
+        print('No file in PDB format available from wwPDB for', pdbid)
+        return None, None
     return [pdbfile, pdbid]
 
 
@@ -788,11 +786,10 @@ class DistanceCalculator:
             except urllib.error.URLError:
                 print('Fetching pdb {} failed, retrying...'.format(
                     pdbid))
-            except RuntimeError:
-                return pdbid
             else:
                 break
-
+        if pdbfile is None:
+            return None
         output_dir.mkdir(parents=True, exist_ok=True)
         with open(pdbpath, 'w') as g:
             g.write(pdbfile)
