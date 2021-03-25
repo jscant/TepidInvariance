@@ -6,6 +6,7 @@ import wandb
 import yaml
 from lie_conv.lieGroups import SE3
 
+from tepid_invariance.models.egnn import EnEquivariant
 from tepid_invariance.models.lie_conv import LieResNet
 from tepid_invariance.models.lie_transformer import LieTransformer
 from tepid_invariance.parse_args import parse_args
@@ -36,7 +37,7 @@ if __name__ == '__main__':
         'attention_fn': args.attention_fn,
         'feature_embed_dim': None,
         'max_sample_norm': None,
-        'lie_algebra_nonlinearity': None,
+        'lie_algebra_nonlinearity': args.lie_algebra_nonlinearity,
         'dropout': args.dropout,
     }
 

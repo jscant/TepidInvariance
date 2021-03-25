@@ -110,4 +110,7 @@ def parse_args():
     parser.add_argument('--weighted_loss', action='store_true',
                         help='Node classification loss is weighted by label '
                              'frequency')
+    parser.add_argument('--lie_algebra_nonlinearity', type=str,
+                        help='Either None or tanh: nonlinearity applied to the '
+                             'lie algebra')
     return parser.parse_args()

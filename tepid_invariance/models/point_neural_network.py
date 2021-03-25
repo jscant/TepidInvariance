@@ -242,7 +242,6 @@ class PointNeuralNetwork(nn.Module):
                          'Time remaining:', eta),
                         ('{0}: {1:.4f}'.format(loss_type, loss),)
                     )
-
                     mean_positive_prediction, mean_negative_prediction = 0., 0.
                     loss = 0.0
                     n_positive, n_negative = 0, 0
