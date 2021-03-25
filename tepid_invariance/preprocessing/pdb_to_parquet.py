@@ -32,6 +32,8 @@ from Bio import PDB as PDB
 from openbabel import openbabel
 from plip.basic.supplemental import extract_pdbid
 
+from tepid_invariance.utils import no_return_parallelise
+
 try:
     from openbabel import pybel
 except (ModuleNotFoundError, ImportError):
@@ -993,13 +995,10 @@ class DistanceCalculator:
         """Use multiprocessing to process all receptors in base_path."""
         base_path = Path(base_path).expanduser()
         all_pdbs = list(base_path.glob('**/receptor.pdb'))
-        cpus = mp.cpu_count()
         output_paths = [Path(output_path, pdb.parent.name) for pdb in all_pdbs]
         hets = [het_map[pdb.parent.name] for pdb in all_pdbs]
-        inputs = [(pdb, het, out) for pdb, het, out in zip(
-            all_pdbs, hets, output_paths)]
-        with mp.Pool(processes=cpus) as pool:
-            pool.starmap(self.calculate_interactions, inputs)
+        no_return_parallelise(
+            self.calculate_interactions, all_pdbs, hets, output_paths)
 
     @staticmethod
     def get_het_map(pdb_list):

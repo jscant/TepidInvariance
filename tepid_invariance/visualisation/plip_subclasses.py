@@ -100,7 +100,7 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
         cmd.alter(self.protname, '%s=stored.b(chain, resi, name, ID, %s)' % (
             'b', 'b'))
         print(self.ligname)
-        # cmd.spectrum('b', 'white_red', 'not ({})'.format(self.ligname))
+        cmd.spectrum('b', 'white_red', 'not ({})'.format(self.ligname))
         cmd.show('sticks', 'b > 0 and not ({})'.format(self.ligname))
         cmd.rebuild()
 

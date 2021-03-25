@@ -4,11 +4,19 @@ together.
 """
 
 import math
+import multiprocessing as mp
 import shutil
 import time
 
 import numpy as np
 from matplotlib import pyplot as plt
+
+
+def no_return_parallelise(func, *args, cpus=-1):
+    cpus = mp.cpu_count() if cpus == -1 else cpus
+    inputs = list(zip(*args))
+    with mp.Pool(processes=cpus) as pool:
+        pool.starmap(func, inputs)
 
 
 def condense(arr, gap=100):
