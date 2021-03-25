@@ -1,5 +1,6 @@
 import torch
 from eqv_transformer.eqv_attention import EquivariantTransformerBlock
+from eqv_transformer.utils import Swish
 from lie_conv.lieGroups import SE3
 from lie_conv.utils import Pass
 from torch import nn
@@ -35,13 +36,19 @@ class LieTransformer(PointNeuralNetwork):
             attention_fn=attention_fn, feature_embed_dim=feature_embed_dim,
         )
 
+        final_hidden = dim_hidden[-1]
         self.net = nn.Sequential(
             Pass(nn.Linear(dim_input, dim_hidden[0]), dim=1),
             *[
                 attention_block(dim_hidden[i], num_heads[i])
                 for i in range(num_layers)
             ],
-            Pass(nn.Linear(dim_hidden[-1], 1), dim=1)
+            Pass(Swish(), dim=1),
+            Pass(nn.Linear(final_hidden, final_hidden // 2), dim=1),
+            Pass(Swish(), dim=1),
+            Pass(nn.Linear(final_hidden // 2, final_hidden // 4), dim=1),
+            Pass(Swish(), dim=1),
+            Pass(nn.Linear(final_hidden // 4, 1), dim=1)
         )
 
         self.group = group
