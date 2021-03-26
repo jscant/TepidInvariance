@@ -6,6 +6,7 @@ import wandb
 import yaml
 from lie_conv.lieGroups import SE3
 
+from tepid_invariance.models.egnn import EnEquivariant
 from tepid_invariance.models.lie_conv import LieResNet
 from tepid_invariance.models.lie_transformer import LieTransformer
 from tepid_invariance.parse_args import parse_args
@@ -20,7 +21,7 @@ if __name__ == '__main__':
         yaml.dump(vars(args), f)
 
     model_kwargs = {
-        'dim_input': 11,
+        'dim_input': 5 if args.use_atomic_numbers else 11,
         'dim_hidden': args.channels,
         'num_layers': args.layers,
         'num_heads': 8,
@@ -46,6 +47,7 @@ if __name__ == '__main__':
     ds = LieTransformerLabelledAtomsDataset(
         args.train_data_root,
         radius=args.radius, max_suffix=args.max_suffix,
+        use_atomic_numbers=args.use_atomic_numbers,
         atom_filter=args.filter)
     dl = torch.utils.data.DataLoader(
         ds, shuffle=True, batch_size=args.batch_size, collate_fn=ds.collate,
@@ -59,6 +61,11 @@ if __name__ == '__main__':
             **model_kwargs)
     elif args.model == 'lietransformer':
         model = LieTransformer(
+            args.save_path, args.learning_rate, args.weight_decay, mode=mode,
+            weighted_loss=args.weighted_loss,
+            **model_kwargs)
+    elif args.model == 'egnn':
+        model = EnEquivariant(
             args.save_path, args.learning_rate, args.weight_decay, mode=mode,
             weighted_loss=args.weighted_loss,
             **model_kwargs)

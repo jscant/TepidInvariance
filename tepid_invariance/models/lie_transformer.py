@@ -24,7 +24,12 @@ class LieTransformer(PointNeuralNetwork):
                   dropout=0):
 
         if isinstance(dim_hidden, int):
+            # dim_hidden = [dim_hidden * (2 ** ((i // 2) + 1))
+            #              for i in range(1, num_layers + 1)]
             dim_hidden = [dim_hidden] * (num_layers + 1)
+        print('dim_hidden', dim_hidden)
+
+
 
         if isinstance(num_heads, int):
             num_heads = [num_heads] * num_layers
@@ -35,6 +40,13 @@ class LieTransformer(PointNeuralNetwork):
             kernel_act=kernel_act, mc_samples=mc_samples, fill=fill,
             attention_fn=attention_fn, feature_embed_dim=feature_embed_dim,
         )
+
+        ab_layers = []
+        for i in range(num_layers - 1):
+            ab_layers.append(attention_block(dim_hidden[i], num_heads[i]))
+            ab_layers.append(
+                Pass(nn.Linear(dim_hidden[i], dim_hidden[i + 1]), 1))
+        ab_layers = nn.ModuleList(ab_layers)
 
         final_hidden = dim_hidden[-1]
         self.net = nn.Sequential(

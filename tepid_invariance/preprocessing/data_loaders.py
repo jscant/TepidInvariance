@@ -34,7 +34,7 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
     """Class for feeding structure parquets into network."""
 
     def __init__(self, base_path, atom_filter, rot=True, max_suffix=np.inf,
-                 radius=12, receptors=None, **kwargs):
+                 use_atomic_numbers=False, radius=12, receptors=None, **kwargs):
         """Initialise dataset.
         Arguments:
             base_path: path containing the 'receptors' and 'ligands'
@@ -57,6 +57,7 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
 
         super().__init__(**kwargs)
         self.filter = atom_filter
+        self.use_atomic_numbers = use_atomic_numbers
         self.rot = random_rotation if rot else lambda x: x
         self.radius = radius
 
@@ -137,12 +138,25 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         struct = self.centre_and_truncate(filename)
         p = torch.from_numpy(np.expand_dims(self.rot(
             struct[struct.columns[:3]].to_numpy()), 0))
-        v = torch.unsqueeze(F.one_hot(
-            torch.as_tensor(struct.types.to_numpy()), 11), 0)
+
+        if self.use_atomic_numbers:
+            map_dict = {
+                6: 0,
+                7: 1,
+                8: 2,
+                16: 3
+            }
+            struct['atomic_categories'] = struct.atomic_number.map(
+                map_dict).fillna(4).astype(int)
+            v = torch.unsqueeze(F.one_hot(
+                torch.as_tensor(struct.atomic_categories.to_numpy()), 5), 0)
+        else:
+            v = torch.unsqueeze(F.one_hot(
+                torch.as_tensor(struct.types.to_numpy()), 11), 0)
         m = torch.from_numpy(np.ones((1, len(struct))))
 
         dist = torch.from_numpy(struct[self.filter].to_numpy())
-        atomic_numbers = torch.from_numpy(struct['types'].to_numpy())
+        atomic_numbers = torch.from_numpy(struct['atomic_number'].to_numpy())
 
         return p, v, m, dist, atomic_numbers, len(struct)
 
@@ -162,10 +176,11 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         Returns:
             Tuple of feature vectors ready for input into a LieConv network.
         """
+        feature_dim = 5  # if self.use_atomic_numbers else 11
         max_len = max([b[-1] for b in batch])
         batch_size = len(batch)
         p_batch = torch.zeros(batch_size, max_len, 3)
-        v_batch = torch.zeros(batch_size, max_len, 11)
+        v_batch = torch.zeros(batch_size, max_len, feature_dim)
         m_batch = torch.zeros(batch_size, max_len)
         label_batch = torch.zeros(batch_size, max_len)
         atomic_numbers = torch.zeros_like(m_batch).long()

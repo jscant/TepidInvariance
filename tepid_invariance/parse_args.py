@@ -113,4 +113,7 @@ def parse_args():
     parser.add_argument('--lie_algebra_nonlinearity', type=str,
                         help='Either None or tanh: nonlinearity applied to the '
                              'lie algebra')
+    parser.add_argument('--use_atomic_numbers', action='store_true',
+                        help='Use atomic numbers as features rather than '
+                             'sminatypes')
     return parser.parse_args()

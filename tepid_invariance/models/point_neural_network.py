@@ -109,16 +109,16 @@ class PointNeuralNetwork(nn.Module):
         if not weighted:
             return torch.mean(self.loss(y_pred, y_true))
 
-        loss = torch.FloatTensor([0]).cuda()
-        for n in range(1, 12):
-            loss += self._get_types_component(y_true, y_pred, n).cuda()
-        return loss / 11
+        #loss = torch.FloatTensor([0]).cuda()
+        #for n in range(1, 12):
+        #    loss += self._get_types_component(y_true, y_pred, n).cuda()
+        #return loss / 11
 
         # Other experimental loss functions
-        for component in [
-            self.N_indices, self.O_indices, self.C_indices, self.F_indices]:
-            loss += self._get_loss_component(y_true, y_pred, component).cuda()
-        return loss / 4
+        #for component in [
+        #    self.N_indices, self.O_indices, self.C_indices, self.F_indices]:
+        #    loss += self._get_loss_component(y_true, y_pred, component).cuda()
+        #return loss / 4
 
         total_nodes = np.product(y_true.shape)
         positive_nodes = float(torch.sum(y_true))
@@ -144,8 +144,8 @@ class PointNeuralNetwork(nn.Module):
         self.train()
         print()
         print()
-        if data_loader.batch_size == 1:
-            aggrigation_interval = 32
+        if data_loader.batch_size <= 4 and not 32 % data_loader.batch_size:
+            aggrigation_interval = 32 // data_loader.batch_size
         else:
             aggrigation_interval = 1
         if self.mode == 'classification':
@@ -192,30 +192,19 @@ class PointNeuralNetwork(nn.Module):
                         'Batch (train)':
                             (self.epoch * len(data_loader) + reported_batch),
                     }
-                    if self.mode == 'classification':
-                        mean_positive_prediction /= aggrigation_interval
-                        mean_negative_prediction /= aggrigation_interval
-                        wandb_update_dict.update({
-                            'Mean positive prediction':
-                                mean_positive_prediction,
-                            'Mean negative prediction':
-                                mean_negative_prediction
-                        })
-                        y_pred_info = 'Mean prediction (positive ({0}) | ' \
-                                      'negative ({1})): {2:0.4f} | ' \
-                                      '{3:0.4f}'.format(
-                            n_positive, n_negative, mean_positive_prediction,
-                            mean_negative_prediction)
-                    else:
-                        mean_pred_std_dev = np.std(y_pred_np)
-                        mean_pred_mean = np.mean(y_pred_np)
-                        mean_true_std_dev = np.std(y_true_np)
-                        mean_true_mean = np.mean(y_true_np)
-                        y_pred_info = 'True mean | std: {0:0.4f} | {1:0.4f}\t' \
-                                      'Predicted mean | std: {2:0.4f} | ' \
-                                      '{3:0.4f}'.format(
-                            mean_true_mean, mean_true_std_dev, mean_pred_mean,
-                            mean_pred_std_dev)
+                    mean_positive_prediction /= aggrigation_interval
+                    mean_negative_prediction /= aggrigation_interval
+                    wandb_update_dict.update({
+                        'Mean positive prediction':
+                            mean_positive_prediction,
+                        'Mean negative prediction':
+                            mean_negative_prediction
+                    })
+                    y_pred_info = 'Mean prediction (positive ({0}) | ' \
+                                  'negative ({1})): {2:0.4f} | ' \
+                                  '{3:0.4f}'.format(
+                        n_positive, n_negative, mean_positive_prediction,
+                        mean_negative_prediction)
                     loss.backward()
                     loss = float(loss)
                     self.optimiser.step()
@@ -242,6 +231,7 @@ class PointNeuralNetwork(nn.Module):
                          'Time remaining:', eta),
                         ('{0}: {1:.4f}'.format(loss_type, loss),)
                     )
+
                     mean_positive_prediction, mean_negative_prediction = 0., 0.
                     loss = 0.0
                     n_positive, n_negative = 0, 0
