@@ -29,6 +29,7 @@ import numpy as np
 import pandas as pd
 import yaml
 from Bio import PDB as PDB
+from Bio.PDB import DSSP
 from openbabel import openbabel
 from plip.basic.supplemental import extract_pdbid
 
@@ -41,7 +42,7 @@ except (ModuleNotFoundError, ImportError):
 
 import argparse
 
-from plip.structure.preparation import PDBComplex
+from plip.structure.preparation import PDBComplex, PDBParser
 
 RESIDUE_IDS = {'MET', 'ARG', 'SER', 'TRP', 'HIS', 'CYS', 'LYS', 'GLU', 'THR',
                'LEU', 'TYR', 'PRO', 'ASN', 'ASP', 'PHE', 'GLY', 'VAL', 'ALA',
@@ -985,8 +986,15 @@ class DistanceCalculator:
 
         results = []
 
+        p = PDBParser()
+        structure = p.get_structure('', pdbfile)
+        dssp = DSSP(structure[0], pdbfile, dssp='mkdssp')
+        keys = list(dssp.keys())
+        seq_map = {idx: dssp[key][3] for idx, key in enumerate(keys)}
+
         for mol_name, info in interaction_info.items():
             df = self.featurise_interaction(mol, info, all_ligand_indices)
+            df['rasa'] = df['sequential_indices'].map(seq_map)
             results.append(data(
                 pdbid=Path(pdbfile.parent.name).stem, molname=mol_name,
                 df=df, ligand_centre=info['mean_ligand_coords']))
