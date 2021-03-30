@@ -833,13 +833,22 @@ class DistanceCalculator:
     def featurise_interaction(self, mol, interaction_dict, all_ligand_indices):
         """Return dataframe with interactions from one particular plip site."""
         xs, ys, zs, types, atomic_nums, atomids = [], [], [], [], [], []
-        keep_atoms = []
+        keep_atoms, sequential_indices = [], []
+        obabel_to_sequential = defaultdict(lambda: len(obabel_to_sequential))
         for atomid, atom in mol.atoms.items():
             if atom.OBAtom.GetResidue().GetName().upper() in RESIDUE_IDS \
                     and atomid not in all_ligand_indices and \
                     atom.atomicnum > 1:
                 keep_atoms.append(atomid)
+
             atomids.append(atomid)
+
+            # Book keeping for DSSP
+            chain = atom.OBAtom.GetResidue().GetChain()
+            residue_id = str(atom.OBAtom.GetResidue().GetIdx())
+            residue_identifier = ':'.join([chain, residue_id])
+            sequential_indices.append(obabel_to_sequential[residue_identifier])
+
             smina_type = self.obatom_to_smina_type(atom)
             if smina_type == "NumTypes":
                 smina_type_int = len(self.atom_type_data)
@@ -860,6 +869,7 @@ class DistanceCalculator:
         types = np.array(types, dtype=int)
         atomids = np.array(atomids, dtype=int)
         atomic_nums = np.array(atomic_nums, dtype=int)
+        sequential_indices = np.array(sequential_indices, dtype=int)
 
         pistacking = np.zeros((len(types),), dtype=np.int32)
         hydrophobic = np.zeros_like(pistacking)
@@ -884,6 +894,7 @@ class DistanceCalculator:
         types = types[np.where(keep_atoms)]
         atomic_nums = atomic_nums[np.where(keep_atoms)]
         atomids = atomids[np.where(keep_atoms)]
+        sequential_indices = sequential_indices[np.where(keep_atoms)]
 
         df = pd.DataFrame()
         df['atom_id'] = atomids
@@ -891,6 +902,7 @@ class DistanceCalculator:
         df['y'] = ys
         df['z'] = zs
         df['atomic_number'] = atomic_nums
+        df['sequential_indices'] = sequential_indices
 
         df['types'] = types
         df['pistacking'] = pistacking
