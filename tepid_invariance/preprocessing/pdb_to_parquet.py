@@ -769,7 +769,7 @@ class DistanceCalculator:
         cpus = mp.cpu_count()
         inputs = [(pdbid, output_dir / pdbid) for pdbid in pdbids
                   if not Path(output_dir, pdbid, 'receptor.pdb').is_file()]
-        with mp.Pool(processes=cpus) as pool:
+        with mp.get_context('spawn').Pool(processes=cpus) as pool:
             pool.starmap(self.download_pdb_file, inputs)
 
     @staticmethod
@@ -794,7 +794,6 @@ class DistanceCalculator:
             else:
                 break
         if pdbfile is None:
-            print('None')
             return 'none'
         output_dir.mkdir(parents=True, exist_ok=True)
         with open(pdbpath, 'w') as g:

@@ -29,7 +29,7 @@ def no_return_parallelise(func, *args, cpus=-1):
         args[idx] = [args[idx]] * iterable_len
 
     inputs = list(zip(*args))
-    with mp.Pool(processes=cpus) as pool:
+    with mp.get_context('spawn').Pool(processes=cpus) as pool:
         pool.starmap(func, inputs)
 
 
