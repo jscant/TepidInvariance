@@ -33,8 +33,8 @@ from Bio import PDB as PDB
 from Bio.PDB import DSSP
 from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from openbabel import openbabel
+from plip.basic import logger
 from plip.basic.supplemental import extract_pdbid
-from plipcmd import logger
 
 from tepid_invariance.utils import no_return_parallelise
 
