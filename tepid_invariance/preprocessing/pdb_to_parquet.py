@@ -1002,6 +1002,8 @@ class DistanceCalculator:
             for mol_name, info in interaction_info.items():
                 df = self.featurise_interaction(mol, info, all_ligand_indices)
                 df['rasa'] = df['sequential_indices'].map(seq_map)
+                if sum(df.rasa.isna()):
+                    print(pdbfile, mol_name, 'has nan values. Discarding.')
                 results.append(data(
                     pdbid=Path(pdbfile.parent.name).stem, molname=mol_name,
                     df=df, ligand_centre=info['mean_ligand_coords']))
