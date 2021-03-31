@@ -20,6 +20,7 @@ pdb_to_parquet.py <base_path> <output_path>
 """
 import multiprocessing as mp
 import urllib
+import warnings
 from collections import defaultdict, namedtuple
 from pathlib import Path
 from urllib.error import HTTPError
@@ -30,6 +31,7 @@ import pandas as pd
 import yaml
 from Bio import PDB as PDB
 from Bio.PDB import DSSP
+from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from openbabel import openbabel
 from plip.basic.supplemental import extract_pdbid
 
@@ -913,7 +915,8 @@ class DistanceCalculator:
         return df
 
     def calculate_interactions(self, pdbfile, hets, output_path,
-                               remove_suspected_duplicates=True):
+                               remove_suspected_duplicates=True,
+                               parser=PDB.PDBParser()):
         """Write parquet files with interactions for each interaction site."""
         pdbfile = Path(pdbfile).expanduser()
         output_path = Path(output_path).expanduser()
@@ -987,9 +990,10 @@ class DistanceCalculator:
 
         results = []
 
-        p = PDB.PDBParser()
-        structure = p.get_structure('', pdbfile)
-        dssp = DSSP(structure[0], pdbfile, dssp='mkdssp')
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', PDBConstructionWarning)
+            structure = parser.get_structure('', pdbfile)
+            dssp = DSSP(structure[0], pdbfile, dssp='mkdssp')
         keys = list(dssp.keys())
         seq_map = {idx: dssp[key][3] for idx, key in enumerate(keys)}
 
@@ -1018,8 +1022,9 @@ class DistanceCalculator:
         all_pdbs = list(base_path.glob('**/receptor.pdb'))
         output_paths = [Path(output_path, pdb.parent.name) for pdb in all_pdbs]
         hets = [het_map[pdb.parent.name] for pdb in all_pdbs]
+        parser = PDB.PDBParser()
         no_return_parallelise(
-            self.calculate_interactions, all_pdbs, hets, output_paths)
+            self.calculate_interactions, all_pdbs, hets, parser, output_paths)
 
     @staticmethod
     def get_het_map(pdb_list):
