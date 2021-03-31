@@ -35,6 +35,8 @@ from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from openbabel import openbabel
 from plip.basic.supplemental import extract_pdbid
 
+from tepid_invariance.utils import no_return_parallelise
+
 try:
     from openbabel import pybel
 except (ModuleNotFoundError, ImportError):
@@ -1025,11 +1027,8 @@ class DistanceCalculator:
         all_pdbs = list(base_path.glob('**/receptor.pdb'))
         output_paths = [Path(output_path, pdb.parent.name) for pdb in all_pdbs]
         hets = [het_map[pdb.parent.name] for pdb in all_pdbs]
-        for pdb, het, out in zip(all_pdbs, hets, output_paths):
-            self.calculate_interactions(pdb, het, out)
-
-        # no_return_parallelise(
-        #    self.calculate_interactions, all_pdbs, hets, output_paths)
+        no_return_parallelise(
+            self.calculate_interactions, all_pdbs, hets, output_paths)
 
     @staticmethod
     def get_het_map(pdb_list):
