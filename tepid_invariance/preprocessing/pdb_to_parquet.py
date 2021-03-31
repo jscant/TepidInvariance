@@ -1019,7 +1019,7 @@ class DistanceCalculator:
         output_paths = [Path(output_path, pdb.parent.name) for pdb in all_pdbs]
         hets = [het_map[pdb.parent.name] for pdb in all_pdbs]
         no_return_parallelise(
-            self.calculate_interactions, all_pdbs, hets, output_paths, cpus=1)
+            self.calculate_interactions, all_pdbs, hets, output_paths)
 
     @staticmethod
     def get_het_map(pdb_list):
