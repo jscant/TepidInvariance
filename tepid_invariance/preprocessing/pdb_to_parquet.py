@@ -914,106 +914,111 @@ class DistanceCalculator:
         return df
 
     def calculate_interactions(self, pdbfile, hets, output_path,
-                               remove_suspected_duplicates=True,
-                               parser=PDB.PDBParser()):
+                               remove_suspected_duplicates=True):
         """Write parquet files with interactions for each interaction site."""
-        pdbfile = Path(pdbfile).expanduser()
-        output_path = Path(output_path).expanduser()
-        if Path(output_path / 'ligand_centres.yaml').is_file():
-            print(pdbfile, 'has already been processed.')
-            return
+        try:
+            pdbfile = Path(pdbfile).expanduser()
+            output_path = Path(output_path).expanduser()
+            if Path(output_path / 'ligand_centres.yaml').is_file():
+                print(pdbfile, 'has already been processed.')
+                return
 
-        output_path.mkdir(parents=True, exist_ok=True)
+            output_path.mkdir(parents=True, exist_ok=True)
 
-        mol = self.read_file(pdbfile, True, read_type='plip')
-        interaction_info = defaultdict(dict)
-        already_processed = set()
-        data = namedtuple('interaction_set', 'pdbid molname df ligand_centre')
+            mol = self.read_file(pdbfile, True, read_type='plip')
+            interaction_info = defaultdict(dict)
+            already_processed = set()
+            data = namedtuple('interaction_set',
+                              'pdbid molname df ligand_centre')
 
-        for mol_name, pl_interaction in mol.interaction_sets.items():
-            out_name = '{0}_{1}.parquet'.format(
-                pdbfile.parent.name, mol_name.replace(':', '-'))
-            if Path(output_path, out_name).exists():
-                continue
-            chunks = mol_name.split(':')
-            het = ':'.join(chunks[:-1])  # Het id : chain id
-            if het not in hets:
-                # Some other ligand or metal ion we aren't interested in
-                continue
-            if remove_suspected_duplicates:
-                # We don't want duplicates caused by n-mers
-                if het in already_processed:
+            for mol_name, pl_interaction in mol.interaction_sets.items():
+                out_name = '{0}_{1}.parquet'.format(
+                    pdbfile.parent.name, mol_name.replace(':', '-'))
+                if Path(output_path, out_name).exists():
                     continue
-                already_processed.add(het)
-            print(pdbfile, mol_name)
+                chunks = mol_name.split(':')
+                het = ':'.join(chunks[:-1])  # Het id : chain id
+                if het not in hets:
+                    # Some other ligand or metal ion we aren't interested in
+                    continue
+                if remove_suspected_duplicates:
+                    # We don't want duplicates caused by n-mers
+                    if het in already_processed:
+                        continue
+                    already_processed.add(het)
+                print(pdbfile, mol_name)
 
-            # Process interactions
-            hbonds_rec_acceptors = pl_interaction.hbonds_ldon
-            hbonds_rec_donators = pl_interaction.hbonds_pdon
-            interaction_info[mol_name]['rec_acceptors'] = np.array([
-                h.a_orig_idx for h in hbonds_rec_acceptors], dtype=np.int32)
-            interaction_info[mol_name]['rec_donors'] = np.array([
-                h.d_orig_idx for h in hbonds_rec_donators], dtype=np.int32)
+                # Process interactions
+                hbonds_rec_acceptors = pl_interaction.hbonds_ldon
+                hbonds_rec_donators = pl_interaction.hbonds_pdon
+                interaction_info[mol_name]['rec_acceptors'] = np.array([
+                    h.a_orig_idx for h in hbonds_rec_acceptors], dtype=np.int32)
+                interaction_info[mol_name]['rec_donors'] = np.array([
+                    h.d_orig_idx for h in hbonds_rec_donators], dtype=np.int32)
 
-            pi_lists = [interaction.proteinring.atoms_orig_idx for interaction
-                        in pl_interaction.pistacking]
-            interaction_info[mol_name]['pi_stacking'] = np.array([
-                idx for idx_list in pi_lists for idx in idx_list],
-                dtype=np.int32)
+                pi_lists = [interaction.proteinring.atoms_orig_idx for
+                            interaction
+                            in pl_interaction.pistacking]
+                interaction_info[mol_name]['pi_stacking'] = np.array([
+                    idx for idx_list in pi_lists for idx in idx_list],
+                    dtype=np.int32)
 
-            hydrophobic_indices = np.array([
-                interaction.bsatom_orig_idx for interaction
-                in pl_interaction.hydrophobic_contacts], dtype=np.int32)
-            interaction_info[mol_name]['hydrophobic'] = hydrophobic_indices
-            interaction_info[mol_name]['ligand_indices'] = None
+                hydrophobic_indices = np.array([
+                    interaction.bsatom_orig_idx for interaction
+                    in pl_interaction.hydrophobic_contacts], dtype=np.int32)
+                interaction_info[mol_name]['hydrophobic'] = hydrophobic_indices
+                interaction_info[mol_name]['ligand_indices'] = None
 
-            for ligand in mol.ligands:
-                lig_name = ligand.mol.title
-                if lig_name == mol_name:
-                    interaction_info[mol_name]['ligand_indices'] = np.array(
-                        list(ligand.can_to_pdb.values()), dtype=np.int32)
-                    interaction_info[mol_name][
-                        'mean_ligand_coords'] = [
-                        float('{:.3f}'.format(i)) for i in np.mean(
-                            np.array([np.array(atom.coords) for
-                                      atom in ligand.mol.atoms]), axis=0)]
-                    break
-            if interaction_info[mol_name]['ligand_indices'] is None:
-                raise RuntimeError(
-                    'No indexing information found for {}'.format(mol_name))
+                for ligand in mol.ligands:
+                    lig_name = ligand.mol.title
+                    if lig_name == mol_name:
+                        interaction_info[mol_name]['ligand_indices'] = np.array(
+                            list(ligand.can_to_pdb.values()), dtype=np.int32)
+                        interaction_info[mol_name][
+                            'mean_ligand_coords'] = [
+                            float('{:.3f}'.format(i)) for i in np.mean(
+                                np.array([np.array(atom.coords) for
+                                          atom in ligand.mol.atoms]), axis=0)]
+                        break
+                if interaction_info[mol_name]['ligand_indices'] is None:
+                    raise RuntimeError(
+                        'No indexing information found for {}'.format(mol_name))
 
-        all_ligand_indices = [
-            list(ligand.can_to_pdb.values()) for ligand in mol.ligands]
-        all_ligand_indices = [idx for idx_list in all_ligand_indices
-                              for idx in idx_list]
+            all_ligand_indices = [
+                list(ligand.can_to_pdb.values()) for ligand in mol.ligands]
+            all_ligand_indices = [idx for idx_list in all_ligand_indices
+                                  for idx in idx_list]
 
-        results = []
+            results = []
 
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore', PDBConstructionWarning)
-            structure = parser.get_structure('', pdbfile)
-            dssp = DSSP(structure[0], pdbfile, dssp='mkdssp')
-        keys = list(dssp.keys())
-        seq_map = {idx: dssp[key][3] for idx, key in enumerate(keys)}
+            with warnings.catch_warnings():
+                parser = PDB.PDBParser()
+                warnings.simplefilter('ignore', PDBConstructionWarning)
+                structure = parser.get_structure('', pdbfile)
+                dssp = DSSP(structure[0], pdbfile, dssp='mkdssp')
+            keys = list(dssp.keys())
+            seq_map = {idx: dssp[key][3] for idx, key in enumerate(keys)}
 
-        for mol_name, info in interaction_info.items():
-            df = self.featurise_interaction(mol, info, all_ligand_indices)
-            df['rasa'] = df['sequential_indices'].map(seq_map)
-            results.append(data(
-                pdbid=Path(pdbfile.parent.name).stem, molname=mol_name,
-                df=df, ligand_centre=info['mean_ligand_coords']))
+            for mol_name, info in interaction_info.items():
+                df = self.featurise_interaction(mol, info, all_ligand_indices)
+                df['rasa'] = df['sequential_indices'].map(seq_map)
+                results.append(data(
+                    pdbid=Path(pdbfile.parent.name).stem, molname=mol_name,
+                    df=df, ligand_centre=info['mean_ligand_coords']))
 
-        if len(results):
-            ligand_centres = {}
-            for result in results:
-                mol_name = '{0}_{1}'.format(
-                    result.pdbid, result.molname.replace(':', '-'))
-                out_name = mol_name + '.parquet'
-                result.df.to_parquet(output_path / out_name)
-                ligand_centres[mol_name] = result.ligand_centre
+            if len(results):
+                ligand_centres = {}
+                for result in results:
+                    mol_name = '{0}_{1}'.format(
+                        result.pdbid, result.molname.replace(':', '-'))
+                    out_name = mol_name + '.parquet'
+                    result.df.to_parquet(output_path / out_name)
+                    ligand_centres[mol_name] = result.ligand_centre
 
-            with open(output_path / 'ligand_centres.yaml', 'w') as f:
-                yaml.dump(ligand_centres, f)
+                with open(output_path / 'ligand_centres.yaml', 'w') as f:
+                    yaml.dump(ligand_centres, f)
+        except Exception as e:
+            print(e)
 
     def parallel_process_directory(self, base_path, output_path, het_map):
         """Use multiprocessing to process all receptors in base_path."""
@@ -1021,9 +1026,8 @@ class DistanceCalculator:
         all_pdbs = list(base_path.glob('**/receptor.pdb'))
         output_paths = [Path(output_path, pdb.parent.name) for pdb in all_pdbs]
         hets = [het_map[pdb.parent.name] for pdb in all_pdbs]
-        parser = PDB.PDBParser()
         no_return_parallelise(
-            self.calculate_interactions, all_pdbs, hets, output_paths, parser)
+            self.calculate_interactions, all_pdbs, hets, output_paths)
 
     @staticmethod
     def get_het_map(pdb_list):
