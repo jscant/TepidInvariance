@@ -34,6 +34,7 @@ from Bio.PDB import DSSP
 from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from openbabel import openbabel
 from plip.basic.supplemental import extract_pdbid
+from plipcmd import logger
 
 from tepid_invariance.utils import no_return_parallelise
 
@@ -1018,6 +1019,7 @@ class DistanceCalculator:
                 with open(output_path / 'ligand_centres.yaml', 'w') as f:
                     yaml.dump(ligand_centres, f)
         except Exception as e:
+            logger.error(str(e))
             print(e)
 
     def parallel_process_directory(self, base_path, output_path, het_map):
