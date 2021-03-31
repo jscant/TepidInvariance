@@ -33,10 +33,7 @@ from Bio import PDB as PDB
 from Bio.PDB import DSSP
 from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from openbabel import openbabel
-from plip.basic import logger
 from plip.basic.supplemental import extract_pdbid
-
-from tepid_invariance.utils import no_return_parallelise
 
 try:
     from openbabel import pybel
@@ -996,8 +993,9 @@ class DistanceCalculator:
                 parser = PDB.PDBParser()
                 warnings.simplefilter('ignore', PDBConstructionWarning)
                 structure = parser.get_structure('', pdbfile)
-                dssp = DSSP(structure[0], pdbfile, dssp='mkdssp')
-            keys = list(dssp.keys())
+            dssp = DSSP(structure[0], pdbfile, dssp='mkdssp')
+            keys = [key for key in dssp.keys() if
+                    not isinstance(dssp[key][3], str)]
             seq_map = {idx: dssp[key][3] for idx, key in enumerate(keys)}
 
             for mol_name, info in interaction_info.items():
@@ -1019,7 +1017,6 @@ class DistanceCalculator:
                 with open(output_path / 'ligand_centres.yaml', 'w') as f:
                     yaml.dump(ligand_centres, f)
         except Exception as e:
-            logger.error(str(e))
             print(e)
 
     def parallel_process_directory(self, base_path, output_path, het_map):
@@ -1028,8 +1025,11 @@ class DistanceCalculator:
         all_pdbs = list(base_path.glob('**/receptor.pdb'))
         output_paths = [Path(output_path, pdb.parent.name) for pdb in all_pdbs]
         hets = [het_map[pdb.parent.name] for pdb in all_pdbs]
-        no_return_parallelise(
-            self.calculate_interactions, all_pdbs, hets, output_paths)
+        for pdb, het, out in zip(all_pdbs, hets, output_paths):
+            self.calculate_interactions(pdb, het, out)
+
+        # no_return_parallelise(
+        #    self.calculate_interactions, all_pdbs, hets, output_paths)
 
     @staticmethod
     def get_het_map(pdb_list):
