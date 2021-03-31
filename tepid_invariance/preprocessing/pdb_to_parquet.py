@@ -842,14 +842,14 @@ class DistanceCalculator:
                     and atomid not in all_ligand_indices and \
                     atom.atomicnum > 1:
                 keep_atoms.append(atomid)
+                # Book keeping for DSSP
+                chain = atom.OBAtom.GetResidue().GetChain()
+                residue_id = str(atom.OBAtom.GetResidue().GetIdx())
+                residue_identifier = ':'.join([chain, residue_id])
+                sequential_indices.append(
+                    obabel_to_sequential[residue_identifier])
 
             atomids.append(atomid)
-
-            # Book keeping for DSSP
-            chain = atom.OBAtom.GetResidue().GetChain()
-            residue_id = str(atom.OBAtom.GetResidue().GetIdx())
-            residue_identifier = ':'.join([chain, residue_id])
-            sequential_indices.append(obabel_to_sequential[residue_identifier])
 
             smina_type = self.obatom_to_smina_type(atom)
             if smina_type == "NumTypes":
@@ -896,7 +896,6 @@ class DistanceCalculator:
         types = types[np.where(keep_atoms)]
         atomic_nums = atomic_nums[np.where(keep_atoms)]
         atomids = atomids[np.where(keep_atoms)]
-        sequential_indices = sequential_indices[np.where(keep_atoms)]
 
         df = pd.DataFrame()
         df['atom_id'] = atomids
@@ -1058,7 +1057,7 @@ class DistanceCalculator:
 
 if __name__ == '__main__':
     # dt = DistanceCalculator()
-    # dt._test_single_file('data/scpdb/pdb/11bg/receptor.pdb')  # 11bg
+    # dt._test_single_file('data/scpdb/pdb/1pl1/receptor.pdb')
     # exit(0)
 
     parser = argparse.ArgumentParser()
