@@ -42,7 +42,7 @@ except (ModuleNotFoundError, ImportError):
 
 import argparse
 
-from plip.structure.preparation import PDBComplex, PDBParser
+from plip.structure.preparation import PDBComplex
 
 RESIDUE_IDS = {'MET', 'ARG', 'SER', 'TRP', 'HIS', 'CYS', 'LYS', 'GLU', 'THR',
                'LEU', 'TYR', 'PRO', 'ASN', 'ASP', 'PHE', 'GLY', 'VAL', 'ALA',
@@ -864,9 +864,9 @@ class DistanceCalculator:
             types.append(type_int)
             atomic_nums.append(atom.atomicnum)
 
-        xs = np.array(xs, dtype=int)
-        ys = np.array(ys, dtype=int)
-        zs = np.array(zs, dtype=int)
+        xs = np.array(xs, dtype=float)
+        ys = np.array(ys, dtype=float)
+        zs = np.array(zs, dtype=float)
         types = np.array(types, dtype=int)
         atomids = np.array(atomids, dtype=int)
         atomic_nums = np.array(atomic_nums, dtype=int)
@@ -922,6 +922,7 @@ class DistanceCalculator:
             return
 
         output_path.mkdir(parents=True, exist_ok=True)
+
         mol = self.read_file(pdbfile, True, read_type='plip')
         interaction_info = defaultdict(dict)
         already_processed = set()
@@ -986,7 +987,7 @@ class DistanceCalculator:
 
         results = []
 
-        p = PDBParser()
+        p = PDB.PDBParser()
         structure = p.get_structure('', pdbfile)
         dssp = DSSP(structure[0], pdbfile, dssp='mkdssp')
         keys = list(dssp.keys())
@@ -1018,7 +1019,7 @@ class DistanceCalculator:
         output_paths = [Path(output_path, pdb.parent.name) for pdb in all_pdbs]
         hets = [het_map[pdb.parent.name] for pdb in all_pdbs]
         no_return_parallelise(
-            self.calculate_interactions, all_pdbs, hets, output_paths)
+            self.calculate_interactions, all_pdbs, hets, output_paths, cpus=1)
 
     @staticmethod
     def get_het_map(pdb_list):
