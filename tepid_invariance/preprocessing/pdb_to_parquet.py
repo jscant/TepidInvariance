@@ -1024,7 +1024,7 @@ class DistanceCalculator:
         hets = [het_map[pdb.parent.name] for pdb in all_pdbs]
         parser = PDB.PDBParser()
         no_return_parallelise(
-            self.calculate_interactions, all_pdbs, hets, parser, output_paths)
+            self.calculate_interactions, all_pdbs, hets, output_paths, parser)
 
     @staticmethod
     def get_het_map(pdb_list):
