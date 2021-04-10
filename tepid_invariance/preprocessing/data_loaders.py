@@ -33,8 +33,9 @@ def one_hot(numerical_category, num_classes):
 class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
     """Class for feeding structure parquets into network."""
 
-    def __init__(self, base_path, atom_filter, rot=True, max_suffix=np.inf,
-                 use_atomic_numbers=False, radius=12, receptors=None, **kwargs):
+    def __init__(self, base_path, atom_filter, feature_dim, rot=True,
+                 use_rasa=False, use_atomic_numbers=False, radius=12,
+                 receptors=None, **kwargs):
         """Initialise dataset.
         Arguments:
             base_path: path containing the 'receptors' and 'ligands'
@@ -60,11 +61,11 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
         self.use_atomic_numbers = use_atomic_numbers
         self.rot = random_rotation if rot else lambda x: x
         self.radius = radius
+        self.feature_dim = feature_dim
+        self.use_rasa = use_rasa
 
         self.base_path = Path(base_path).expanduser()
-        self.filenames = [f for f in self.base_path.glob('**/*.parquet')
-                          if max_suffix == np.inf or
-                          int(Path(f.name).stem.split('_')[-1]) <= max_suffix]
+        self.filenames = sorted(list(self.base_path.glob('**/*.parquet')))
 
         receptors = set()
         ligand_coordinate_info = {}
@@ -78,10 +79,9 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
                     ligand_coordinate_info[receptor.name] = yaml.load(
                         f, yaml.FullLoader)
             except FileNotFoundError:
-                print(
-                    '{0} not found. Will use entire protein for receptor {1} ('
-                    'no bounding box/truncation'
-                    ')'.format(ligand_coordinate_statistics_filename, receptor))
+                print('{0} not found. Will use entire protein for receptor '
+                      '{1} (no bounding box/truncation'.format(
+                    ligand_coordinate_statistics_filename, receptor))
         self.ligand_coordinate_info = ligand_coordinate_info
 
     def centre_and_truncate(self, filename):
@@ -148,11 +148,16 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
             }
             struct['atomic_categories'] = struct.atomic_number.map(
                 map_dict).fillna(4).astype(int)
-            v = torch.unsqueeze(F.one_hot(
-                torch.as_tensor(struct.atomic_categories.to_numpy()), 5), 0)
+            v = torch.unsqueeze(F.one_hot(torch.as_tensor(
+                struct.atomic_categories.to_numpy()), self.feature_dim),
+                0).float()
         else:
             v = torch.unsqueeze(F.one_hot(
-                torch.as_tensor(struct.types.to_numpy()), 11), 0)
+                torch.as_tensor(struct.types.to_numpy()), self.feature_dim),
+                0).float()
+
+        if self.use_rasa:
+            v[..., -1] = torch.as_tensor(struct['rasa'].to_numpy()).squeeze()
         m = torch.from_numpy(np.ones((1, len(struct))))
 
         dist = torch.from_numpy(struct[self.filter].to_numpy())
@@ -160,23 +165,24 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
 
         return p, v, m, dist, atomic_numbers, len(struct)
 
-    @staticmethod
-    def collate(batch):
-        """Processing of inputs which takes place after batch is selected.
 
-        LieConv networks take tuples of torch tensors (p, v, m), which are:
-            p, (batch_size, n_atoms, 3): coordinates of each atom
-            v, (batch_size, n_atoms, n_features): features for each atom
-            m, (batch_size, n_atoms): mask for each coordinate slot
-        Note that n_atoms is the largest number of atoms in a structure in
-        each batch. LieTransformer networks take the first two of these (p, v).
+def get_lt_collate_fn(feature_dim):
+    """Processing of inputs which takes place after batch is selected.
 
-        Arguments:
-            batch: iterable of individual inputs.
-        Returns:
-            Tuple of feature vectors ready for input into a LieConv network.
-        """
-        feature_dim = 5  # if self.use_atomic_numbers else 11
+    LieConv networks take tuples of torch tensors (p, v, m), which are:
+        p, (batch_size, n_atoms, 3): coordinates of each atom
+        v, (batch_size, n_atoms, n_features): features for each atom
+        m, (batch_size, n_atoms): mask for each coordinate slot
+    Note that n_atoms is the largest number of atoms in a structure in
+    each batch. LieTransformer networks take the first two of these (p, v).
+
+    Arguments:
+        batch: iterable of individual inputs.
+    Returns:
+        Tuple of feature vectors ready for input into a LieConv network.
+    """
+
+    def collate_fn(batch):
         max_len = max([b[-1] for b in batch])
         batch_size = len(batch)
         p_batch = torch.zeros(batch_size, max_len, 3)
@@ -195,3 +201,5 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
             except IndexError:  # no positive labels
                 pass
         return (p_batch, v_batch, m_batch.bool()), label_batch, atomic_numbers
+
+    return collate_fn

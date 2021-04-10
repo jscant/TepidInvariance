@@ -10,7 +10,14 @@ import time
 import types
 
 import numpy as np
+import pandas as pd
 from matplotlib import pyplot as plt
+
+
+def print_whole_df(df):
+    with pd.option_context(
+            'display.max_rows', None, 'display.max_columns', None):
+        print(df)
 
 
 def no_return_parallelise(func, *args, cpus=-1):

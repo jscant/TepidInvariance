@@ -116,4 +116,7 @@ def parse_args():
     parser.add_argument('--use_atomic_numbers', action='store_true',
                         help='Use atomic numbers as features rather than '
                              'sminatypes')
+    parser.add_argument('--use_rasa', action='store_true',
+                        help='Include relative acessible surface area of each '
+                             'residue as part of the input feature vector')
     return parser.parse_args()

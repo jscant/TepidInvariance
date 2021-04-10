@@ -1,11 +1,15 @@
+from pathlib import Path
+
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
+from Bio.PDB import PDBParser, DSSP
 from plip.basic.remote import VisualizerData
 from plip.visualization.pymol import PyMOLVisualizer
 from pymol import cmd, stored
 
-import pandas as pd
+
 class VisualizerDataWithMolecularInfo(VisualizerData):
     """VisualizerData but with the mol, ligand and pli objects stored."""
 
@@ -42,8 +46,21 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
         df['y'] -= mean_y
         df['z'] -= mean_z
         df['sq_dist'] = (df['x'] ** 2 + df['y'] ** 2 + df['z'] ** 2)
+        radius = 12
         df = df[df.sq_dist < radius ** 2].copy()
-        del df['sq_dist']
+        for i in df.sequential_indices.to_numpy():
+            print(i)
+
+        pdbid = '5ce3'
+        p = PDBParser()
+        pdbfile = Path(
+            'scratch/test/receptor_protonated.pdb')
+        structure = p.get_structure(pdbid, pdbfile)
+        dssp = DSSP(structure[0], pdbfile, dssp='mkdssp')
+        keys = list(dssp.keys())
+        seq_map = {idx: dssp[key][3] for idx, key in enumerate(keys)}
+        df['asa'] = df['sequential_indices'].map(seq_map)
+        print(df['asa'].to_numpy())
 
         labelled_indices = df['atom_id'].to_numpy()
         unlabelled_indices = np.setdiff1d(all_indices, labelled_indices)
@@ -54,10 +71,11 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
             torch.as_tensor(df.types.to_numpy()), 11), 0).float()
         m = torch.from_numpy(np.ones((1, len(df)))).bool()
 
-        model_labels = torch.sigmoid(
-            model((p.cuda(),
-                   v.cuda(),
-                   m.cuda()))).cpu().detach().numpy()[0, :].squeeze()
+        #model_labels = torch.sigmoid(
+        #    model((p.cuda(),
+        #           v.cuda(),
+        #           m.cuda()))).cpu().detach().numpy()[0, :].squeeze()
+        model_labels = df['asa'].to_numpy()
 
         df['probability'] = model_labels
         with pd.option_context('display.max_colwidth', None):

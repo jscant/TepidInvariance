@@ -11,7 +11,7 @@ from tepid_invariance.models.lie_conv import LieResNet
 from tepid_invariance.models.lie_transformer import LieTransformer
 from tepid_invariance.parse_args import parse_args
 from tepid_invariance.preprocessing.data_loaders import \
-    LieTransformerLabelledAtomsDataset
+    LieTransformerLabelledAtomsDataset, get_lt_collate_fn
 
 if __name__ == '__main__':
     args = parse_args()
@@ -20,8 +20,12 @@ if __name__ == '__main__':
     with open(args.save_path.expanduser() / 'cmd_line_args.yaml', 'w') as f:
         yaml.dump(vars(args), f)
 
+    dim_input = 5 if args.use_atomic_numbers else 11
+    if args.use_rasa:
+        dim_input += 1
+
     model_kwargs = {
-        'dim_input': 5 if args.use_atomic_numbers else 11,
+        'dim_input': dim_input,
         'dim_hidden': args.channels,
         'num_layers': args.layers,
         'num_heads': 8,
@@ -45,13 +49,12 @@ if __name__ == '__main__':
     random.seed(0)
     np.random.seed(0)
     ds = LieTransformerLabelledAtomsDataset(
-        args.train_data_root,
-        radius=args.radius, max_suffix=args.max_suffix,
-        use_atomic_numbers=args.use_atomic_numbers,
+        args.train_data_root, radius=args.radius, feature_dim=dim_input,
+        use_rasa=args.use_rasa, use_atomic_numbers=args.use_atomic_numbers,
         atom_filter=args.filter)
     dl = torch.utils.data.DataLoader(
-        ds, shuffle=True, batch_size=args.batch_size, collate_fn=ds.collate,
-        drop_last=True)
+        ds, shuffle=True, batch_size=args.batch_size,
+        collate_fn=get_lt_collate_fn(dim_input), drop_last=True)
 
     mode = 'classification'
     if args.model == 'lieconv':
