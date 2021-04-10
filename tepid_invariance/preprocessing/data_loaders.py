@@ -160,7 +160,12 @@ class LieTransformerLabelledAtomsDataset(torch.utils.data.Dataset):
             v[..., -1] = torch.as_tensor(struct['rasa'].to_numpy()).squeeze()
         m = torch.from_numpy(np.ones((1, len(struct))))
 
-        dist = torch.from_numpy(struct[self.filter].to_numpy())
+        # Special case: mix hba/hbd
+        if self.filter == 'hb':
+            dist = torch.from_numpy(
+                np.amax(np.vstack([struct.hba, struct.hbd]), axis=0))
+        else:
+            dist = torch.from_numpy(struct[self.filter].to_numpy())
         atomic_numbers = torch.from_numpy(struct['atomic_number'].to_numpy())
 
         return p, v, m, dist, atomic_numbers, len(struct)
