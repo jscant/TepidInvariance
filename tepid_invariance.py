@@ -6,7 +6,7 @@ import wandb
 import yaml
 from lie_conv.lieGroups import SE3
 
-from tepid_invariance.models.egnn import EnEquivariant
+#from tepid_invariance.models.egnn import EnEquivariant
 from tepid_invariance.models.lie_conv import LieResNet
 from tepid_invariance.models.lie_transformer import LieTransformer
 from tepid_invariance.parse_args import parse_args
@@ -67,11 +67,11 @@ if __name__ == '__main__':
             args.save_path, args.learning_rate, args.weight_decay, mode=mode,
             weighted_loss=args.weighted_loss,
             **model_kwargs)
-    elif args.model == 'egnn':
-        model = EnEquivariant(
-            args.save_path, args.learning_rate, args.weight_decay, mode=mode,
-            weighted_loss=args.weighted_loss,
-            **model_kwargs)
+    #elif args.model == 'egnn':
+    #    model = EnEquivariant(
+    #        args.save_path, args.learning_rate, args.weight_decay, mode=mode,
+    #        weighted_loss=args.weighted_loss,
+    #        **model_kwargs)
     else:
         raise NotImplementedError(
             'supplied model arg must be either lieconv or lietransformer')
