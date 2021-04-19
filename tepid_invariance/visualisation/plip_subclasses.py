@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import torch
@@ -23,7 +21,9 @@ class VisualizerDataWithMolecularInfo(VisualizerData):
 
 class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
 
-    def colour_b_factors(self, model, dt, chain='', quiet=False, radius=12):
+    def colour_b_factors(self, model, pdb_file, dt, input_dim, chain='',
+                         quiet=False, radius=12, rasa=False,
+                         use_atomic_numbers=False):
 
         def atom_data_extract(chain, atom_to_bfactor_map):
             bdat = {}
@@ -39,7 +39,7 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
         all_indices = df['atom_id'].to_numpy()
 
         centre_coords = find_ligand_centre(self.plcomplex.ligand)
-        print(self.plcomplex.uid, centre_coords)
+        print(self.plcomplex.uid)
         mean_x, mean_y, mean_z = centre_coords
 
         df['x'] -= mean_x
@@ -48,34 +48,44 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
         df['sq_dist'] = (df['x'] ** 2 + df['y'] ** 2 + df['z'] ** 2)
         radius = 12
         df = df[df.sq_dist < radius ** 2].copy()
-        for i in df.sequential_indices.to_numpy():
-            print(i)
 
-        pdbid = '5ce3'
-        p = PDBParser()
-        pdbfile = Path(
-            'scratch/test/receptor_protonated.pdb')
-        structure = p.get_structure(pdbid, pdbfile)
-        dssp = DSSP(structure[0], pdbfile, dssp='mkdssp')
+        pdbid = self.plcomplex.pdbid
+        p = PDBParser(QUIET=True)
+        structure = p.get_structure(pdbid, pdb_file)
+        dssp = DSSP(structure[0], pdb_file, dssp='mkdssp')
         keys = list(dssp.keys())
         seq_map = {idx: dssp[key][3] for idx, key in enumerate(keys)}
-        df['asa'] = df['sequential_indices'].map(seq_map)
-        print(df['asa'].to_numpy())
+        df['rasa'] = df['sequential_indices'].map(seq_map)
 
         labelled_indices = df['atom_id'].to_numpy()
         unlabelled_indices = np.setdiff1d(all_indices, labelled_indices)
 
         p = torch.from_numpy(
             np.expand_dims(df[df.columns[1:4]].to_numpy(), 0).astype('float32'))
-        v = torch.unsqueeze(F.one_hot(
-            torch.as_tensor(df.types.to_numpy()), 11), 0).float()
         m = torch.from_numpy(np.ones((1, len(df)))).bool()
 
-        #model_labels = torch.sigmoid(
-        #    model((p.cuda(),
-        #           v.cuda(),
-        #           m.cuda()))).cpu().detach().numpy()[0, :].squeeze()
-        model_labels = df['asa'].to_numpy()
+        if use_atomic_numbers:
+            map_dict = {
+                6: 0,
+                7: 1,
+                8: 2,
+                16: 3
+            }
+            df['atomic_categories'] = df.atomic_number.map(
+                map_dict).fillna(4).astype(int)
+            v = torch.unsqueeze(F.one_hot(torch.as_tensor(
+                df.atomic_categories.to_numpy()), input_dim), 0).float()
+        else:
+            v = torch.unsqueeze(F.one_hot(torch.as_tensor(
+                df.types.to_numpy()), input_dim), 0).float()
+
+        if rasa:
+            v[..., -1] = torch.as_tensor(df['rasa'].to_numpy()).squeeze()
+
+        #model = model.train()
+        model_labels = torch.sigmoid(model((
+            p.cuda(), v.cuda(), m.cuda()))).cpu().detach().numpy().squeeze()
+        print(model_labels)
 
         df['probability'] = model_labels
         with pd.option_context('display.max_colwidth', None):
@@ -103,7 +113,7 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
                     return b_factor_labels[chain][int(ID)][0]
 
             try:
-                if not chain in b_factor_labels:
+                if chain not in b_factor_labels:
                     chain = ''
                 b = _lookup(chain, resi, name, ID)
                 if not quiet: print(

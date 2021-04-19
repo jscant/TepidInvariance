@@ -29,8 +29,6 @@ class LieTransformer(PointNeuralNetwork):
             dim_hidden = [dim_hidden] * (num_layers + 1)
         print('dim_hidden', dim_hidden)
 
-
-
         if isinstance(num_heads, int):
             num_heads = [num_heads] * num_layers
 

@@ -3,7 +3,6 @@ from pathlib import Path
 
 import torch
 import yaml
-from lie_conv.lieConv import LieResNet
 from lie_conv.lieGroups import SE3
 from plip.basic import config
 from plip.basic.supplemental import create_folder_if_not_exists, start_pymol
@@ -11,13 +10,15 @@ from plip.structure.preparation import PDBComplex
 from plipcmd import logger
 from pymol import cmd
 
+from tepid_invariance.models.lie_conv import LieResNet
 from tepid_invariance.models.lie_transformer import LieTransformer
 from tepid_invariance.preprocessing.pdb_to_parquet import DistanceCalculator
 from tepid_invariance.visualisation.plip_subclasses import \
     PyMOLVisualizerWithBFactorColouring, VisualizerDataWithMolecularInfo
 
 
-def visualize_in_pymol(model, plcomplex, radius=12):
+def visualize_in_pymol(model, pdb_file, plcomplex, input_dim, radius=12,
+                       rasa=False, use_atomic_numbers=False):
     """Visualizes the given Protein-Ligand complex at one site in PyMOL.
 
     This function is based on the origina plip.visualization.vizualise_in_pymol
@@ -104,7 +105,10 @@ def visualize_in_pymol(model, plcomplex, radius=12):
     vis.show_metal()  # Metal Coordination
 
     dt = DistanceCalculator()
-    vis.colour_b_factors(model, dt, '', True, radius=radius)
+    vis.colour_b_factors(
+        model, pdb_file=pdb_file, dt=dt, chain='', quiet=True,
+        input_dim=input_dim, radius=radius, rasa=rasa,
+        use_atomic_numbers=use_atomic_numbers)
 
     vis.refinements()
 
@@ -138,7 +142,8 @@ def visualize_in_pymol(model, plcomplex, radius=12):
         vis.save_picture(config.OUTPATH, filename)
 
 
-def process_pdb(model, pdbfile, outpath, radius=12):
+def process_pdb(model, pdbfile, outpath, input_dim, radius=12, rasa=False,
+                use_atomic_numbers=False):
     mol = PDBComplex()
     mol.output_path = outpath
     mol.load_pdb(pdbfile, as_string=False)
@@ -152,8 +157,10 @@ def process_pdb(model, pdbfile, outpath, radius=12):
         mol.interaction_sets)
                  if not len(mol.interaction_sets[site].interacting_res) == 0]
 
-    [visualize_in_pymol(model, plcomplex, radius=radius) for plcomplex in
-     complexes]
+    [visualize_in_pymol(model, pdb_file=pdbfile, plcomplex=plcomplex,
+                        input_dim=input_dim, radius=radius, rasa=rasa,
+                        use_atomic_numbers=use_atomic_numbers)
+     for plcomplex in complexes]
 
 
 def colour_structure(model, rec, out):
@@ -166,15 +173,22 @@ def colour_structure(model, rec, out):
         cmd_line_args = yaml.load(f, Loader=yaml.Loader)
 
     model_type = cmd_line_args['model']
+    rasa = cmd_line_args['use_rasa']
+    input_dim = model_kwargs['dim_input']
+    use_atomic_numbers = cmd_line_args['use_atomic_numbers']
     model_class = {
         'lietransformer': LieTransformer, 'lieconv': LieResNet}[model_type]
-    model_obj = model_class(Path(), 0, 0, silent=True, **model_kwargs)
+    model_obj = model_class(Path(), learning_rate=0.001, weight_decay=0,
+                            mode='classifiaction', weighted_loss=False,
+                            silent=True, **model_kwargs)
 
     checkpoint = torch.load(model)
     model_obj.load_state_dict(checkpoint['model_state_dict'])
-    model_obj.eval()
+    #model_obj.eval()
 
-    process_pdb(model_obj, str(rec), str(out), radius=cmd_line_args['radius'])
+    process_pdb(model_obj, str(rec), str(out), input_dim=input_dim,
+                radius=cmd_line_args['radius'], rasa=rasa,
+                use_atomic_numbers=use_atomic_numbers)
 
 
 if __name__ == '__main__':

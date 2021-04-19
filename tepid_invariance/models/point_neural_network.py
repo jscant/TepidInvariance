@@ -109,16 +109,16 @@ class PointNeuralNetwork(nn.Module):
         if not weighted:
             return torch.mean(self.loss(y_pred, y_true))
 
-        #loss = torch.FloatTensor([0]).cuda()
-        #for n in range(1, 12):
+        # loss = torch.FloatTensor([0]).cuda()
+        # for n in range(1, 12):
         #    loss += self._get_types_component(y_true, y_pred, n).cuda()
-        #return loss / 11
+        # return loss / 11
 
         # Other experimental loss functions
-        #for component in [
+        # for component in [
         #    self.N_indices, self.O_indices, self.C_indices, self.F_indices]:
         #    loss += self._get_loss_component(y_true, y_pred, component).cuda()
-        #return loss / 4
+        # return loss / 4
 
         total_nodes = np.product(y_true.shape)
         positive_nodes = float(torch.sum(y_true))

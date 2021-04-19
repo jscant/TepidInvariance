@@ -14,7 +14,7 @@ class LieResNet(PointNeuralNetwork):
     def _process_inputs(self, x):
         return tuple([inp.cuda() for inp in x])
 
-    def build_net(self, dim_input, ds_frac=1, dim_hidden=16, nbhd=32,
+    def build_net(self, dim_input, ds_frac=1, dim_hidden=16, mc_samples=32,
                   act='swish', bn=True, num_layers=6, mean=True, pool=True,
                   liftsamples=1, fill=1 / 4, group=SE3, knn=False, cache=False,
                   dropout=0, **kwargs):
@@ -26,7 +26,7 @@ class LieResNet(PointNeuralNetwork):
                 net. In (0,1)
             k: channel width for the network. Can be int (same for all) or array
                 to specify individually.
-            nbhd: number of samples to use for Monte Carlo estimation (p)
+            mc_samples: number of samples to use for Monte Carlo estimation (p)
             act:
             bn: whether or not to use batch normalization. Recommended in al
                 cases except dynamical systems.
@@ -48,7 +48,7 @@ class LieResNet(PointNeuralNetwork):
         if isinstance(dim_hidden, int):
             dim_hidden = [dim_hidden] * (num_layers + 1)
         conv = lambda ki, ko, fill: LieConv(
-            ki, ko, mc_samples=nbhd, ds_frac=ds_frac, bn=bn, act=act, mean=mean,
+            ki, ko, mc_samples=mc_samples, ds_frac=ds_frac, bn=bn, act=act, mean=mean,
             group=group, fill=fill, cache=cache, knn=knn)
         nonlinearity = nn.ReLU if act == 'relu' else Swish
         self.net = nn.Sequential(
