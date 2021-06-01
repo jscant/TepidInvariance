@@ -817,7 +817,6 @@ class DistanceCalculator:
                              in pl_interaction.pistacking]
         pi_stacking_atoms = [
             atom for ring in pi_stacking_atoms for atom in ring]
-        print([atom.atomicnum for atom in pi_stacking_atoms])
 
         interaction_info['pi_stacking'] = {
             coords_to_string(atom.coords): 1 for atom in pi_stacking_atoms}
@@ -924,9 +923,9 @@ class DistanceCalculator:
         try:
             pdbfile = Path(pdbfile).expanduser()
             output_path = Path(output_path).expanduser()
-            # if Path(output_path / 'ligand_centres.yaml').is_file():
-            #    print(pdbfile, 'has already been processed.')
-            #    return
+            if Path(output_path / 'ligand_centres.yaml').is_file():
+               print(pdbfile, 'has already been processed.')
+               return
 
             output_path.mkdir(parents=True, exist_ok=True)
 
@@ -1038,9 +1037,9 @@ class DistanceCalculator:
 
 
 if __name__ == '__main__':
-    dt = DistanceCalculator()
-    dt._test_single_file('data/scpdb/pdb/1pl1/receptor.pdb')
-    exit(0)
+    #dt = DistanceCalculator()
+    #dt._test_single_file('data/scpdb/pdb/1pl1/receptor.pdb')
+    #exit(0)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('pdb_list', type=str,
