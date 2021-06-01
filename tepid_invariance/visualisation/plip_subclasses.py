@@ -5,7 +5,9 @@ import torch.nn.functional as F
 from Bio.PDB import PDBParser, DSSP
 from plip.basic.remote import VisualizerData
 from plip.visualization.pymol import PyMOLVisualizer
-from pymol import cmd, stored
+from pymol import cmd
+
+from tepid_invariance.utils import truncate_float, coords_to_string
 
 
 class VisualizerDataWithMolecularInfo(VisualizerData):
@@ -25,13 +27,32 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
                          quiet=False, radius=12, rasa=False,
                          use_atomic_numbers=False):
 
-        def atom_data_extract(chain, atom_to_bfactor_map):
-            bdat = {}
+        def change_bfactors(bfactors):
+            """Modify bfactors based on spatial location.
 
-            for idx, b_factor in atom_to_bfactor_map.items():
-                bdat.setdefault(chain, {})[idx] = (b_factor, '')
+            Due to inconsistencies in the indexing of atoms, residues and chains
+            between openbabel, plip and pymol, we must use coordinates to
+            identify atoms.
 
-            return bdat
+            Arguments:
+                bfactors: dict of dict of dicts with the mapping:
+                    x: y: z: value
+                where value is the number we wish to assign to the atom (as the
+                b-factor) for labelling. The x, y and z coordinates should be
+                in the format of strings, with 1 decimal place to avoid
+                problems with comparing floats (use '{:.1f}.format(<coord>).
+            """
+
+            def modify_bfactor(x, y, z):
+                """Return b factor given the x, y, z coordinates."""
+                x, y, z = ['{:.3f}'.format(coord) for coord in (x, y, z)]
+                bfactor = bfactors[x][y][z]
+                return bfactor
+
+            space = {'modify_bfactor': modify_bfactor}
+            cmd.alter_state(
+                0, '(all)', 'b=modify_bfactor(x, y, z)', space=space,
+                quiet=True)
 
         df = dt.mol_calculate_interactions(
             self.plcomplex.mol, self.plcomplex.pli)
@@ -40,14 +61,20 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
 
         centre_coords = find_ligand_centre(self.plcomplex.ligand)
         print(self.plcomplex.uid)
-        mean_x, mean_y, mean_z = centre_coords
+        mean_x, mean_y, mean_z = [truncate_float(i) for i in centre_coords]
 
         df['x'] -= mean_x
         df['y'] -= mean_y
         df['z'] -= mean_z
         df['sq_dist'] = (df['x'] ** 2 + df['y'] ** 2 + df['z'] ** 2)
-        radius = 12
         df = df[df.sq_dist < radius ** 2].copy()
+        print(df)
+        df['x'] += mean_x
+        df['y'] += mean_y
+        df['z'] += mean_z
+        del df['sq_dist']
+
+        x, y, z = df['x'].to_numpy(), df['y'].to_numpy(), df['z'].to_numpy()
 
         pdbid = self.plcomplex.pdbid
         p = PDBParser(QUIET=True)
@@ -82,7 +109,7 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
         if rasa:
             v[..., -1] = torch.as_tensor(df['rasa'].to_numpy()).squeeze()
 
-        #model = model.train()
+        model = model.eval()
         model_labels = torch.sigmoid(model((
             p.cuda(), v.cuda(), m.cuda()))).cpu().detach().numpy().squeeze()
         print(model_labels)
@@ -93,43 +120,17 @@ class PyMOLVisualizerWithBFactorColouring(PyMOLVisualizer):
                 with pd.option_context('display.max_columns', None):
                     print(df)
 
-        atom_to_bfactor_map = {
-            labelled_indices[i]: model_labels[i] for i in range(len(df))}
-        atom_to_bfactor_map.update({
-            idx: 0 for idx in unlabelled_indices})
+        atom_to_bfactor_map = {}
+        for i in range(len(df)):
+            bfactor = float(model_labels[i])
+            atom_to_bfactor_map[coords_to_string((x[i], y[i], z[i]))] = bfactor
 
-        # change self.protname to ''
-        b_factor_labels = atom_data_extract(
-            chain, atom_to_bfactor_map)
-
-        def b_lookup(chain, resi, name, ID, b):
-            def _lookup(chain, resi, name, ID):
-                if resi in b_factor_labels[chain] and isinstance(
-                        b_factor_labels[chain][resi],
-                        dict):
-                    return b_factor_labels[chain][resi][name][0]
-                else:
-                    # find data by ID
-                    return b_factor_labels[chain][int(ID)][0]
-
-            try:
-                if chain not in b_factor_labels:
-                    chain = ''
-                b = _lookup(chain, resi, name, ID)
-                if not quiet: print(
-                    '///%s/%s/%s new: %f' % (chain, resi, name, b))
-            except KeyError:
-                if not quiet: print(
-                    '///%s/%s/%s keeping: %f' % (chain, resi, name, b))
-            return b
-
-        stored.b = b_lookup
-
-        cmd.alter(self.protname, '%s=stored.b(chain, resi, name, ID, %s)' % (
-            'b', 'b'))
+        cmd.alter('all', 'b=0')
+        change_bfactors(atom_to_bfactor_map)
         print(self.ligname)
-        cmd.spectrum('b', 'white_red', 'not ({})'.format(self.ligname))
-        cmd.show('sticks', 'b > 0 and not ({})'.format(self.ligname))
+        cmd.spectrum('b', 'white_red', 'not ({})'.format(self.ligname),
+                     minimum=0, maximum=1)
+        cmd.show('sticks', 'b > 0')
         cmd.rebuild()
 
 

@@ -35,7 +35,8 @@ from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from openbabel import openbabel
 from plip.basic.supplemental import extract_pdbid
 
-from tepid_invariance.utils import no_return_parallelise
+from tepid_invariance.utils import no_return_parallelise, coords_to_string, \
+    truncate_float
 
 try:
     from openbabel import pybel
@@ -806,23 +807,25 @@ class DistanceCalculator:
         interaction_info = {}
 
         # Process interactions
-        hbonds_rec_acceptors = pl_interaction.hbonds_ldon
-        hbonds_rec_donators = pl_interaction.hbonds_pdon
-        interaction_info['rec_acceptors'] = np.array([
-            h.a_orig_idx for h in hbonds_rec_acceptors], dtype=np.int32)
-        interaction_info['rec_donors'] = np.array([
-            h.d_orig_idx for h in hbonds_rec_donators], dtype=np.int32)
+        hbonds_lig_donors = pl_interaction.hbonds_ldon
+        hbonds_rec_donors = pl_interaction.hbonds_pdon
+        interaction_info['rec_acceptors'] = {
+            coords_to_string(hbond.a.coords): 1 for hbond in hbonds_lig_donors}
+        interaction_info['rec_donors'] = {
+            coords_to_string(hbond.d.coords): 1 for hbond in hbonds_rec_donors}
+        pi_stacking_atoms = [interaction.proteinring.atoms for interaction
+                             in pl_interaction.pistacking]
+        pi_stacking_atoms = [
+            atom for ring in pi_stacking_atoms for atom in ring]
+        print([atom.atomicnum for atom in pi_stacking_atoms])
 
-        pi_lists = [interaction.proteinring.atoms_orig_idx for interaction
-                    in pl_interaction.pistacking]
-        interaction_info['pi_stacking'] = np.array([
-            idx for idx_list in pi_lists for idx in idx_list],
-            dtype=np.int32)
+        interaction_info['pi_stacking'] = {
+            coords_to_string(atom.coords): 1 for atom in pi_stacking_atoms}
 
-        hydrophobic_indices = np.array([
-            interaction.bsatom_orig_idx for interaction
-            in pl_interaction.hydrophobic_contacts], dtype=np.int32)
-        interaction_info['hydrophobic'] = hydrophobic_indices
+        hydrophobic_atoms = [interaction.bsatom for interaction
+                             in pl_interaction.hydrophobic_contacts]
+        interaction_info['hydrophobic'] = {
+            coords_to_string(atom.coords): 1 for atom in hydrophobic_atoms}
 
         all_ligand_indices = [list(ligand.can_to_pdb.values()) for ligand in
                               mol.ligands]
@@ -837,11 +840,12 @@ class DistanceCalculator:
         xs, ys, zs, types, atomic_nums, atomids = [], [], [], [], [], []
         keep_atoms, sequential_indices = [], []
         obabel_to_sequential = defaultdict(lambda: len(obabel_to_sequential))
-        for atomid, atom in mol.atoms.items():
+        atoms = []
+        for idx, (atomid, atom) in enumerate(mol.atoms.items()):
             if atom.OBAtom.GetResidue().GetName().upper() in RESIDUE_IDS \
                     and atomid not in all_ligand_indices and \
                     atom.atomicnum > 1:
-                keep_atoms.append(atomid)
+                keep_atoms.append(idx)
                 # Book keeping for DSSP
                 chain = atom.OBAtom.GetResidue().GetChain()
                 residue_id = str(atom.OBAtom.GetResidue().GetIdx())
@@ -850,15 +854,16 @@ class DistanceCalculator:
                     obabel_to_sequential[residue_identifier])
 
             atomids.append(atomid)
+            atoms.append(atom)
 
             smina_type = self.obatom_to_smina_type(atom)
-            if smina_type == "NumTypes":
+            if smina_type == 'NumTypes':
                 smina_type_int = len(self.atom_type_data)
             else:
                 smina_type_int = self.atom_types.index(smina_type)
             type_int = self.type_map[smina_type_int]
 
-            x, y, z = [float('{:.3f}'.format(i)) for i in atom.coords]
+            x, y, z = [truncate_float(i) for i in atom.coords]
             xs.append(x)
             ys.append(y)
             zs.append(z)
@@ -878,24 +883,25 @@ class DistanceCalculator:
         hba = np.zeros_like(pistacking)
         hbd = np.zeros_like(pistacking)
 
-        pistacking[interaction_dict['pi_stacking'] - 1] = 1
-        hydrophobic[interaction_dict['hydrophobic'] - 1] = 1
-        hba[interaction_dict['rec_acceptors'] - 1] = 1
-        hbd[interaction_dict['rec_donors'] - 1] = 1
-
+        for i in range(len(xs)):
+            coords = coords_to_string((xs[i], ys[i], zs[i]))
+            hba[i] = interaction_dict['rec_acceptors'].get(coords, 0)
+            hbd[i] = interaction_dict['rec_donors'].get(coords, 0)
+            pistacking[i] = interaction_dict['pi_stacking'].get(coords, 0)
+            hydrophobic[i] = interaction_dict['hydrophobic'].get(coords, 0)
         mask = np.zeros_like(pistacking)
         mask[keep_atoms] = 1
 
-        pistacking = pistacking[np.where(keep_atoms)]
-        hydrophobic = hydrophobic[np.where(keep_atoms)]
-        hba = hba[np.where(keep_atoms)]
-        hbd = hbd[np.where(keep_atoms)]
-        xs = xs[np.where(keep_atoms)]
-        ys = ys[np.where(keep_atoms)]
-        zs = zs[np.where(keep_atoms)]
-        types = types[np.where(keep_atoms)]
-        atomic_nums = atomic_nums[np.where(keep_atoms)]
-        atomids = atomids[np.where(keep_atoms)]
+        pistacking = pistacking[np.where(mask)]
+        hydrophobic = hydrophobic[np.where(mask)]
+        hba = hba[np.where(mask)]
+        hbd = hbd[np.where(mask)]
+        xs = xs[np.where(mask)]
+        ys = ys[np.where(mask)]
+        zs = zs[np.where(mask)]
+        types = types[np.where(mask)]
+        atomic_nums = atomic_nums[np.where(mask)]
+        atomids = atomids[np.where(mask)]
 
         df = pd.DataFrame()
         df['atom_id'] = atomids
@@ -918,9 +924,9 @@ class DistanceCalculator:
         try:
             pdbfile = Path(pdbfile).expanduser()
             output_path = Path(output_path).expanduser()
-            if Path(output_path / 'ligand_centres.yaml').is_file():
-                print(pdbfile, 'has already been processed.')
-                return
+            # if Path(output_path / 'ligand_centres.yaml').is_file():
+            #    print(pdbfile, 'has already been processed.')
+            #    return
 
             output_path.mkdir(parents=True, exist_ok=True)
 
@@ -930,66 +936,6 @@ class DistanceCalculator:
             data = namedtuple('interaction_set',
                               'pdbid molname df ligand_centre')
 
-            for mol_name, pl_interaction in mol.interaction_sets.items():
-                out_name = '{0}_{1}.parquet'.format(
-                    pdbfile.parent.name, mol_name.replace(':', '-'))
-                if Path(output_path, out_name).exists():
-                    continue
-                chunks = mol_name.split(':')
-                het = ':'.join(chunks[:-1])  # Het id : chain id
-                if het not in hets:
-                    # Some other ligand or metal ion we aren't interested in
-                    continue
-                if remove_suspected_duplicates:
-                    # We don't want duplicates caused by n-mers
-                    if het in already_processed:
-                        continue
-                    already_processed.add(het)
-                print(pdbfile, mol_name)
-
-                # Process interactions
-                hbonds_rec_acceptors = pl_interaction.hbonds_ldon
-                hbonds_rec_donators = pl_interaction.hbonds_pdon
-                interaction_info[mol_name]['rec_acceptors'] = np.array([
-                    h.a_orig_idx for h in hbonds_rec_acceptors], dtype=np.int32)
-                interaction_info[mol_name]['rec_donors'] = np.array([
-                    h.d_orig_idx for h in hbonds_rec_donators], dtype=np.int32)
-
-                pi_lists = [interaction.proteinring.atoms_orig_idx for
-                            interaction
-                            in pl_interaction.pistacking]
-                interaction_info[mol_name]['pi_stacking'] = np.array([
-                    idx for idx_list in pi_lists for idx in idx_list],
-                    dtype=np.int32)
-
-                hydrophobic_indices = np.array([
-                    interaction.bsatom_orig_idx for interaction
-                    in pl_interaction.hydrophobic_contacts], dtype=np.int32)
-                interaction_info[mol_name]['hydrophobic'] = hydrophobic_indices
-                interaction_info[mol_name]['ligand_indices'] = None
-
-                for ligand in mol.ligands:
-                    lig_name = ligand.mol.title
-                    if lig_name == mol_name:
-                        interaction_info[mol_name]['ligand_indices'] = np.array(
-                            list(ligand.can_to_pdb.values()), dtype=np.int32)
-                        interaction_info[mol_name][
-                            'mean_ligand_coords'] = [
-                            float('{:.3f}'.format(i)) for i in np.mean(
-                                np.array([np.array(atom.coords) for
-                                          atom in ligand.mol.atoms]), axis=0)]
-                        break
-                if interaction_info[mol_name]['ligand_indices'] is None:
-                    raise RuntimeError(
-                        'No indexing information found for {}'.format(mol_name))
-
-            all_ligand_indices = [
-                list(ligand.can_to_pdb.values()) for ligand in mol.ligands]
-            all_ligand_indices = [idx for idx_list in all_ligand_indices
-                                  for idx in idx_list]
-
-            results = []
-
             with warnings.catch_warnings():
                 parser = PDB.PDBParser()
                 warnings.simplefilter('ignore', PDBConstructionWarning)
@@ -998,16 +944,49 @@ class DistanceCalculator:
             keys = [key for key in dssp.keys() if
                     not isinstance(dssp[key][3], str)]
             seq_map = {idx: dssp[key][3] for idx, key in enumerate(keys)}
+            results = []
 
-            for mol_name, info in interaction_info.items():
-                df = self.featurise_interaction(mol, info, all_ligand_indices)
+            for mol_name, pl_interaction in mol.interaction_sets.items():
+                out_name = '{0}_{1}.parquet'.format(
+                    pdbfile.parent.name, mol_name.replace(':', '-'))
+                chunks = mol_name.split(':')
+                het = ':'.join(chunks[:-1])  # Het id : chain id
+                if het not in hets or Path(output_path, out_name).exists():
+                    # Already processed, or some other ligand or metal ion we
+                    # aren't interested in
+                    continue
+                if remove_suspected_duplicates and het in already_processed:
+                    # We don't want duplicates caused by n-mers
+                    continue
+
+                df = self.mol_calculate_interactions(mol, pl_interaction)
                 df['rasa'] = df['sequential_indices'].map(seq_map)
                 if sum(df.rasa.isna()):
                     print(pdbfile, mol_name, 'has nan values. Discarding.')
                     continue
+
+                for ligand in mol.ligands:
+                    lig_name = ligand.mol.title
+                    if lig_name == mol_name:
+                        interaction_info[mol_name]['ligand_indices'] = np.array(
+                            list(ligand.can_to_pdb.values()), dtype=np.int32)
+                        interaction_info[mol_name][
+                            'mean_ligand_coords'] = [
+                            truncate_float(i, 5) for i in np.mean(
+                                np.array([np.array(atom.coords) for
+                                          atom in ligand.mol.atoms]), axis=0)]
+                        break
+                if interaction_info[mol_name]['ligand_indices'] is None:
+                    raise RuntimeError(
+                        'No indexing information found for {}'.format(mol_name))
+
+                print(pdbfile, mol_name)
+                already_processed.add(het)
                 results.append(data(
                     pdbid=Path(pdbfile.parent.name).stem, molname=mol_name,
-                    df=df, ligand_centre=info['mean_ligand_coords']))
+                    df=df,
+                    ligand_centre=interaction_info[mol_name][
+                        'mean_ligand_coords']))
 
             if len(results):
                 ligand_centres = {}
@@ -1059,9 +1038,9 @@ class DistanceCalculator:
 
 
 if __name__ == '__main__':
-    # dt = DistanceCalculator()
-    # dt._test_single_file('data/scpdb/pdb/1pl1/receptor.pdb')
-    # exit(0)
+    dt = DistanceCalculator()
+    dt._test_single_file('data/scpdb/pdb/1pl1/receptor.pdb')
+    exit(0)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('pdb_list', type=str,

@@ -14,10 +14,27 @@ import pandas as pd
 from matplotlib import pyplot as plt
 
 
-def print_whole_df(df):
-    with pd.option_context(
-            'display.max_rows', None, 'display.max_columns', None):
-        print(df)
+def truncate_float(x, precision=3):
+    """Return input x truncated to <precision> dp."""
+    str_x = str(x)
+    decimal_pos = str_x.find('.')
+    if decimal_pos == -1:
+        return float(x)
+    after_decimal_value = str_x[decimal_pos + 1:decimal_pos + precision + 1]
+    return float(str_x[:decimal_pos] + '.' + after_decimal_value)
+
+
+def coords_to_string(coords):
+    """Return string representation of truncated coordinates."""
+    return ' '.join([str(truncate_float(x)) for x in coords])
+
+
+def print_df(df):
+    """Print pandas dataframe in its entirity (with no truncation)."""
+    with pd.option_context('display.max_colwidth', None):
+        with pd.option_context('display.max_rows', None):
+            with pd.option_context('display.max_columns', None):
+                print(df)
 
 
 def no_return_parallelise(func, *args, cpus=-1):
