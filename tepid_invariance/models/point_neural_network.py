@@ -41,7 +41,7 @@ class PointNeuralNetwork(nn.Module):
 
         self.loss = nn.BCEWithLogitsLoss(reduction='none')
 
-        self.build_net(**model_kwargs)
+        self.layers = self.build_net(**model_kwargs)
         self.optimiser = torch.optim.Adam(
             self.parameters(), lr=self.lr, weight_decay=weight_decay)
 

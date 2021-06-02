@@ -47,19 +47,7 @@ class LieTransformer(PointNeuralNetwork):
         ab_layers = nn.ModuleList(ab_layers)
 
         final_hidden = dim_hidden[-1]
-        self.net = nn.Sequential(
-            Pass(nn.Linear(dim_input, dim_hidden[0]), dim=1),
-            *[
-                attention_block(dim_hidden[i], num_heads[i])
-                for i in range(num_layers)
-            ],
-            Pass(Swish(), dim=1),
-            Pass(nn.Linear(final_hidden, final_hidden // 2), dim=1),
-            Pass(Swish(), dim=1),
-            Pass(nn.Linear(final_hidden // 2, final_hidden // 4), dim=1),
-            Pass(Swish(), dim=1),
-            Pass(nn.Linear(final_hidden // 4, 1), dim=1)
-        )
+
 
         self.group = group
         self.liftsamples = liftsamples
@@ -74,6 +62,20 @@ class LieTransformer(PointNeuralNetwork):
                     f'{lie_algebra_nonlinearity} is not a supported '
                     f'nonlinearity'
                 )
+
+        return nn.Sequential(
+            Pass(nn.Linear(dim_input, dim_hidden[0]), dim=1),
+            *[
+                attention_block(dim_hidden[i], num_heads[i])
+                for i in range(num_layers)
+            ],
+            # Pass(Swish(), dim=1),
+            Pass(nn.Linear(final_hidden, 1), dim=1),
+            # Pass(Swish(), dim=1),
+            # Pass(nn.Linear(final_hidden // 2, final_hidden // 4), dim=1),
+            # Pass(Swish(), dim=1),
+            # Pass(nn.Linear(final_hidden // 4, 1), dim=1)
+        )
 
     def forward(self, x):
         if self.max_sample_norm is None:
@@ -93,5 +95,4 @@ class LieTransformer(PointNeuralNetwork):
             lifted_data[0] = lifted_data[0] * (
                     self.lie_algebra_nonlinearity(pairs_norm / 7) / pairs_norm
             ).unsqueeze(-1)
-
-        return self.net(lifted_data)[1][..., -1]
+        return self.layers(lifted_data)[1][..., -1]

@@ -48,10 +48,15 @@ class LieResNet(PointNeuralNetwork):
         if isinstance(dim_hidden, int):
             dim_hidden = [dim_hidden] * (num_layers + 1)
         conv = lambda ki, ko, fill: LieConv(
-            ki, ko, mc_samples=mc_samples, ds_frac=ds_frac, bn=bn, act=act, mean=mean,
+            ki, ko, mc_samples=mc_samples, ds_frac=ds_frac, bn=bn, act=act,
+            mean=mean,
             group=group, fill=fill, cache=cache, knn=knn)
         nonlinearity = nn.ReLU if act == 'relu' else Swish
-        self.net = nn.Sequential(
+
+        self.group = group
+        self.liftsamples = liftsamples
+
+        return nn.Sequential(
             Pass(nn.Linear(dim_input, dim_hidden[0]), dim=1),
             *[BottleBlock(dim_hidden[i], dim_hidden[i + 1], conv, bn=bn,
                           act=act, fill=fill[i], dropout=dropout)
@@ -61,12 +66,10 @@ class LieResNet(PointNeuralNetwork):
             Pass(nn.Dropout(p=dropout), dim=1) if dropout else nn.Sequential(),
             Pass(nn.Linear(dim_hidden[-1], 1), dim=1)
         )
-        self.group = group
-        self.liftsamples = liftsamples
 
     def forward(self, x):
         x = tuple([ten.cuda() for ten in self.group.lift(x, self.liftsamples)])
-        return self.net(x)[1].squeeze()
+        return self.layers(x)[1].squeeze()
 
 
 class BottleBlock(nn.Module):
