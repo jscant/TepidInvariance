@@ -43,6 +43,9 @@ if __name__ == '__main__':
         'max_sample_norm': None,
         'lie_algebra_nonlinearity': args.lie_algebra_nonlinearity,
         'dropout': args.dropout,
+        'norm_feats': True,
+        'norm_coords': True,
+        'fourier_features': 4
     }
 
     torch.manual_seed(0)
