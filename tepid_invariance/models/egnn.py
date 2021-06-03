@@ -1,8 +1,8 @@
 from egnn_pytorch import EGNN as EGNNLayer
-from eqv_transformer.utils import Swish
 from lie_conv.utils import Pass
-from tepid_invariance.models.point_neural_network import PointNeuralNetwork
 from torch import nn
+
+from tepid_invariance.models.point_neural_network import PointNeuralNetwork
 
 
 class EGNNPass(nn.Module):
@@ -20,36 +20,6 @@ class EGNNPass(nn.Module):
         return coors, feats, mask
 
 
-class EnEquivariant(PointNeuralNetwork):
-    """Adapted from https://github.com/anonymous-code-0/lie-transformer"""
-
-    def _process_inputs(self, x):
-        """This network takes a tuple."""
-        return x[1].cuda(), x[0].cuda()
-
-    def build_net(self, dim_input, dim_hidden, kernel_dim, num_layers,
-                  **kwargs):
-        if isinstance(dim_hidden, int):
-            dim_hidden = [dim_hidden] * (num_layers + 1)
-
-        self.net = nn.Sequential(
-            EGNNLayer(dim_input, dim_hidden[0], kernel_dim),
-            *[EGNNLayer(dim_hidden[i - 1], dim_hidden[i], kernel_dim)
-              for i in range(1, num_layers)],
-            Pass(nn.Linear(dim_hidden[-1], dim_hidden[-1] // 2), dim=0),
-            Pass(Swish(), dim=0),
-            Pass(nn.Linear(dim_hidden[-1] // 2, 1), dim=0)
-        )
-
-    def forward(self, x):
-        for layer in self.net:
-            if isinstance(layer, EGNN):
-                x = layer(*x)
-            else:
-                x = layer(x)
-        return x[0].squeeze()
-
-
 class EGNN(PointNeuralNetwork):
 
     # We have our own initialisation methods for EGNN
@@ -57,11 +27,8 @@ class EGNN(PointNeuralNetwork):
     def xavier_init(m):
         pass
 
-    def _get_y_true(self, y):
-        return y.cuda()
-
     def _process_inputs(self, x):
-        return [i.cuda() for i in x]
+        return tuple([i.cuda() for i in x])
 
     def build_net(self, dim_input, dim_output=1, dim_hidden=12, nbhd=0,
                   dropout=0.0, num_layers=6, fourier_features=16,
@@ -84,4 +51,4 @@ class EGNN(PointNeuralNetwork):
         )
 
     def forward(self, x):
-        return self.layers(x)[1].flatten()
+        return self.layers(x)[1].squeeze()
