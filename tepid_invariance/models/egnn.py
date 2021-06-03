@@ -63,16 +63,17 @@ class EGNN(PointNeuralNetwork):
     def _process_inputs(self, x):
         return [i.cuda() for i in x]
 
-    def build_net(self, dim_input, dim_output=1, k=12, nbhd=0,
+    def build_net(self, dim_input, dim_output=1, dim_hidden=12, nbhd=0,
                   dropout=0.0, num_layers=6, fourier_features=16,
-                  norm_coords=True, norm_feats=False, thin_mlps=False,
+                  norm_coords=True, norm_feats=True, thin_mlps=False,
                   **kwargs):
         m_dim = 16
         layer_class = EGNNLayer
         egnn = lambda: layer_class(
-            dim=k, m_dim=m_dim, norm_coors=norm_coords, norm_feats=norm_feats,
-            dropout=dropout, fourier_features=fourier_features,
-            num_nearest_neighbors=nbhd, init_eps=1e-2)
+            dim=dim_hidden, m_dim=m_dim, norm_coors=norm_coords,
+            norm_feats=norm_feats, dropout=dropout,
+            fourier_features=fourier_features, num_nearest_neighbors=nbhd,
+            init_eps=1e-2)
 
         return nn.Sequential(
             Pass(nn.Linear(dim_input, k), dim=1),
