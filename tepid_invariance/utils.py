@@ -40,9 +40,10 @@ def truncate_float(x, precision=3):
     return float(str_x[:decimal_pos] + '.' + after_decimal_value)
 
 
-def coords_to_string(coords):
+def coords_to_string(coords, precision=3):
     """Return string representation of truncated coordinates."""
-    return ' '.join([str(truncate_float(x)) for x in coords])
+    return ' '.join(
+        [str(truncate_float(x, precision=precision)) for x in coords])
 
 
 def print_df(df):

@@ -34,7 +34,6 @@ from Bio.PDB import DSSP
 from Bio.PDB.PDBExceptions import PDBConstructionWarning
 from openbabel import openbabel
 from plip.basic.supplemental import extract_pdbid
-
 from tepid_invariance.utils import no_return_parallelise, coords_to_string, \
     truncate_float
 
@@ -806,7 +805,7 @@ class DistanceCalculator:
         """Return dataframe with interactions from plip mol object"""
         interaction_info = {}
 
-        # Process interactions
+        # Process interactions, store coordinates of interacting protein atoms
         hbonds_lig_donors = pl_interaction.hbonds_ldon
         hbonds_rec_donors = pl_interaction.hbonds_pdon
         interaction_info['rec_acceptors'] = {
@@ -826,31 +825,36 @@ class DistanceCalculator:
         interaction_info['hydrophobic'] = {
             coords_to_string(atom.coords): 1 for atom in hydrophobic_atoms}
 
-        all_ligand_indices = [list(ligand.can_to_pdb.values()) for ligand in
-                              mol.ligands]
-        all_ligand_indices = [idx for idx_list in all_ligand_indices for idx in
-                              idx_list]
+        # Book-keeping to track ligand atoms by coordinates
+        all_ligand_mols = [ligand.molecule for ligand in mol.ligands]
+        all_ligand_coords = set(
+            [coords_to_string(mol.coords) for mol in all_ligand_mols])
 
         return self.featurise_interaction(
-            mol, interaction_info, all_ligand_indices)
+            mol, interaction_info, all_ligand_coords)
 
-    def featurise_interaction(self, mol, interaction_dict, all_ligand_indices):
+    def featurise_interaction(self, mol, interaction_dict, all_ligand_coords):
         """Return dataframe with interactions from one particular plip site."""
+
+        def is_protein_atom(atom):
+            coords_str = coords_to_string(atom.coords)
+            return (atom.OBAtom.GetResidue().GetName().upper() in RESIDUE_IDS
+                    and coords_str in all_ligand_coords
+                    and atom.atomicnum > 1)
+
         xs, ys, zs, types, atomic_nums, atomids = [], [], [], [], [], []
         keep_atoms, sequential_indices = [], []
         obabel_to_sequential = defaultdict(lambda: len(obabel_to_sequential))
         atoms = []
         for idx, (atomid, atom) in enumerate(mol.atoms.items()):
-            if atom.OBAtom.GetResidue().GetName().upper() in RESIDUE_IDS \
-                    and atomid not in all_ligand_indices and \
-                    atom.atomicnum > 1:
-                keep_atoms.append(idx)
-                # Book keeping for DSSP
-                chain = atom.OBAtom.GetResidue().GetChain()
-                residue_id = str(atom.OBAtom.GetResidue().GetIdx())
-                residue_identifier = ':'.join([chain, residue_id])
-                sequential_indices.append(
-                    obabel_to_sequential[residue_identifier])
+            if not is_protein_atom(atom):
+                continue
+            # Book keeping for DSSP
+            chain = atom.OBAtom.GetResidue().GetChain()
+            residue_id = str(atom.OBAtom.GetResidue().GetIdx())
+            residue_identifier = ':'.join([chain, residue_id])
+            sequential_indices.append(
+                obabel_to_sequential[residue_identifier])
 
             atomids.append(atomid)
             atoms.append(atom)
@@ -888,19 +892,6 @@ class DistanceCalculator:
             hbd[i] = interaction_dict['rec_donors'].get(coords, 0)
             pistacking[i] = interaction_dict['pi_stacking'].get(coords, 0)
             hydrophobic[i] = interaction_dict['hydrophobic'].get(coords, 0)
-        mask = np.zeros_like(pistacking)
-        mask[keep_atoms] = 1
-
-        pistacking = pistacking[np.where(mask)]
-        hydrophobic = hydrophobic[np.where(mask)]
-        hba = hba[np.where(mask)]
-        hbd = hbd[np.where(mask)]
-        xs = xs[np.where(mask)]
-        ys = ys[np.where(mask)]
-        zs = zs[np.where(mask)]
-        types = types[np.where(mask)]
-        atomic_nums = atomic_nums[np.where(mask)]
-        atomids = atomids[np.where(mask)]
 
         df = pd.DataFrame()
         df['atom_id'] = atomids
@@ -924,8 +915,8 @@ class DistanceCalculator:
             pdbfile = Path(pdbfile).expanduser()
             output_path = Path(output_path).expanduser()
             if Path(output_path / 'ligand_centres.yaml').is_file():
-               print(pdbfile, 'has already been processed.')
-               return
+                print(pdbfile, 'has already been processed.')
+                return
 
             output_path.mkdir(parents=True, exist_ok=True)
 
@@ -1037,9 +1028,9 @@ class DistanceCalculator:
 
 
 if __name__ == '__main__':
-    #dt = DistanceCalculator()
-    #dt._test_single_file('data/scpdb/pdb/1pl1/receptor.pdb')
-    #exit(0)
+    # dt = DistanceCalculator()
+    # dt._test_single_file('data/scpdb/pdb/1pl1/receptor.pdb')
+    # exit(0)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('pdb_list', type=str,
