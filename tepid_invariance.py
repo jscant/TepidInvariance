@@ -45,7 +45,8 @@ if __name__ == '__main__':
         'dropout': args.dropout,
         'norm_feats': True,
         'norm_coords': True,
-        'fourier_features': 4
+        'fourier_features': 4,
+        'nbhd': args.nbhd,
     }
 
     torch.manual_seed(0)
