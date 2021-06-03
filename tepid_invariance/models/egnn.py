@@ -76,11 +76,11 @@ class EGNN(PointNeuralNetwork):
             init_eps=1e-2)
 
         return nn.Sequential(
-            Pass(nn.Linear(dim_input, k), dim=1),
+            Pass(nn.Linear(dim_input, dim_hidden), dim=1),
             *[EGNNPass(egnn()) for _ in range(num_layers)],
-            Pass(nn.Linear(k, k), dim=1),
+            Pass(nn.Linear(dim_hidden, dim_hidden), dim=1),
             Pass(nn.SiLU(), dim=1),
-            Pass(nn.Linear(k, 1), dim=1)
+            Pass(nn.Linear(dim_hidden, 1), dim=1)
         )
 
     def forward(self, x):
